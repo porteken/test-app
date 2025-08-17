@@ -1,9 +1,25 @@
 "use client";
 
-import { Combobox, Loader, TextInput, useCombobox } from "@mantine/core";
-import { useIntersection } from "@mantine/hooks";
 import { InfiniteData } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef } from "react";
+import { ChevronsUpDown, Loader2 } from "lucide-react";
+import * as React from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useInView } from "react-intersection-observer";
+
+import { Button } from "@/components/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
 export type InfiniteQueryPage = {
   items: any[];
@@ -20,7 +36,7 @@ export type InfiniteSearchableSelectProperties<TData> = {
   itemToId: (item: TData) => string;
   itemToName: (item: TData) => string;
   label: string;
-  onValueChange: (value: null | TData) => void;
+  onValueChange: (value: null | TData) => void; // parent filter state updater
   placeholder: string;
   search: string;
   selectedValue: null | TData;
@@ -43,114 +59,95 @@ export function InfiniteSearchableSelect<TData>({
   selectedValue,
   setSearch,
 }: InfiniteSearchableSelectProperties<TData>) {
-  const combobox = useCombobox({
-    onDropdownClose: () => combobox.resetSelectedOption(),
-  });
+  const [open, setOpen] = useState(false);
 
   const allItems = useMemo(
     () => data?.pages.flatMap(page => page.items) ?? [],
     [data]
   );
 
-  const scrollContainerReference = useRef<HTMLDivElement>(null);
-  const { entry, ref: intersectionReference } = useIntersection({
-    root: scrollContainerReference.current,
+  // react-intersection-observer
+  const { inView, ref: intersectionReference } = useInView({
     threshold: 1,
   });
 
   useEffect(() => {
-    if (entry?.isIntersecting && hasNextPage && !isFetching) {
+    if (inView && hasNextPage && !isFetching) {
       fetchNextPage();
     }
-  }, [entry, hasNextPage, isFetching, fetchNextPage]);
-
-  const options = useMemo(
-    () =>
-      allItems.map(item => (
-        <Combobox.Option key={itemToId(item)} value={itemToId(item)}>
-          {itemToName(item)}
-        </Combobox.Option>
-      )),
-    [allItems, itemToId, itemToName]
-  );
-
-  const renderOptions = () => {
-    if (isError) {
-      return (
-        <Combobox.Empty style={{ color: "red" }}>
-          Error fetching data
-        </Combobox.Empty>
-      );
-    }
-
-    if (options.length === 0 && !isFetching) {
-      return <Combobox.Empty>Nothing found</Combobox.Empty>;
-    }
-
-    return (
-      <>
-        {options}
-        {hasNextPage && (
-          <div ref={intersectionReference} style={{ height: 1 }} />
-        )}
-        {isFetchingNextPage && (
-          <Combobox.Empty>
-            <Loader size="sm" />
-          </Combobox.Empty>
-        )}
-      </>
-    );
-  };
+  }, [inView, hasNextPage, isFetching, fetchNextPage]);
 
   return (
-    <Combobox
-      onOptionSubmit={value => {
-        const selectedItem =
-          allItems.find(item => itemToId(item) === value) ?? null;
-        onValueChange(selectedItem);
-        setSearch(selectedItem ? itemToName(selectedItem) : "");
-        combobox.closeDropdown();
-      }}
-      store={combobox}
-      withinPortal={false}
-    >
-      <Combobox.Target>
-        <TextInput
-          label={label}
-          onBlur={() => {
-            combobox.closeDropdown();
-            setSearch(selectedValue ? itemToName(selectedValue) : "");
-          }}
-          onChange={event => {
-            setSearch(event.currentTarget.value);
-            combobox.openDropdown();
-            if (event.currentTarget.value === "") {
-              onValueChange(null);
-            }
-          }}
-          onClick={() => combobox.openDropdown()}
-          onFocus={event => {
-            combobox.openDropdown();
-            event.currentTarget.select();
-          }}
-          placeholder={placeholder}
-          rightSection={
-            isFetching && !isFetchingNextPage ? <Loader size="xs" /> : undefined
-          }
-          value={search}
-        />
-      </Combobox.Target>
-
-      <Combobox.Dropdown>
-        <Combobox.Options>
-          <div
-            ref={scrollContainerReference}
-            style={{ maxHeight: "200px", overflowY: "auto" }}
+    <div className="flex flex-col gap-2">
+      <label className="text-sm font-medium">{label}</label>
+      <Popover onOpenChange={setOpen} open={open}>
+        <PopoverTrigger asChild>
+          <Button
+            aria-expanded={open}
+            className="w-full justify-between"
+            role="combobox"
+            variant="outline"
           >
-            {renderOptions()}
-          </div>
-        </Combobox.Options>
-      </Combobox.Dropdown>
-    </Combobox>
+            {selectedValue ? itemToName(selectedValue) : placeholder}
+            {isFetching && !isFetchingNextPage ? (
+              <Loader2 className="ml-2 h-4 w-4 animate-spin opacity-70" />
+            ) : (
+              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            )}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+          <Command shouldFilter={false}>
+            <CommandInput
+              onValueChange={value => {
+                setSearch(value);
+                if (value === "") {
+                  onValueChange(null); // clear filter
+                }
+              }}
+              placeholder={placeholder}
+              value={search}
+            />
+            <CommandList className="max-h-52">
+              {isError && (
+                <CommandEmpty className="text-red-500">
+                  Error fetching data
+                </CommandEmpty>
+              )}
+
+              {!isError && allItems.length === 0 && !isFetching && (
+                <CommandEmpty>Nothing found</CommandEmpty>
+              )}
+
+              <CommandGroup>
+                {allItems.map(item => (
+                  <CommandItem
+                    key={itemToId(item)}
+                    onSelect={() => {
+                      onValueChange(item); // update parent filter state
+                      setSearch(itemToName(item));
+                      setOpen(false);
+                    }}
+                    value={itemToId(item)}
+                  >
+                    {itemToName(item)}
+                  </CommandItem>
+                ))}
+
+                {hasNextPage && (
+                  <div className="h-1" ref={intersectionReference} />
+                )}
+
+                {isFetchingNextPage && (
+                  <div className="flex justify-center py-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  </div>
+                )}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+    </div>
   );
 }

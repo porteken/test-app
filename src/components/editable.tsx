@@ -1,31 +1,38 @@
 "use client";
 
 import {
-  ActionIcon,
-  Alert,
-  Button,
-  Checkbox,
-  Group,
-  Loader,
-  Modal,
-  Stack,
-  Table,
-  Text,
-  TextInput,
-} from "@mantine/core";
-import { DatePickerInput } from "@mantine/dates";
-import { useDisclosure } from "@mantine/hooks";
-import { notifications } from "@mantine/notifications";
-import {
-  IconAlertCircle,
-  IconDeviceFloppy,
-  IconEdit,
-  IconPlus,
-  IconTrash,
-  IconX,
-} from "@tabler/icons-react";
+  AlertCircle,
+  Edit,
+  Loader2,
+  Plus,
+  Save,
+  Trash2,
+  X,
+} from "lucide-react";
 import React, { useCallback, useEffect, useState } from "react";
-import "@mantine/dates/styles.css";
+import { toast } from "sonner";
+
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+
 interface EditableRecord {
   bought: boolean;
   customer: string;
@@ -43,14 +50,8 @@ const API_BASE_URL = "http://localhost:8000/api/editable";
 const isPersistentId = (id: number | string | undefined): boolean =>
   typeof id === "number" || (typeof id === "string" && /^\d+$/.test(id));
 
-const convertPickerOutputToString = (
-  pickerOutput: Date | null | string
-): string => {
-  if (!pickerOutput) {
-    return "";
-  }
-  const date = new Date(pickerOutput);
-  if (Number.isNaN(date.getTime())) {
+const convertDateToString = (date: Date | null): string => {
+  if (!date || Number.isNaN(date.getTime())) {
     return "";
   }
   const year = date.getFullYear();
@@ -59,13 +60,11 @@ const convertPickerOutputToString = (
   return `${year}-${month}-${day}`;
 };
 
-const parseYMDStringToDate = (
-  dateString: null | string | undefined
-): Date | null => {
+const parseStringToDate = (dateString: null | string | undefined): string => {
   if (!dateString) {
-    return null;
+    return "";
   }
-  return new Date(`${dateString}T00:00:00`);
+  return dateString;
 };
 
 const validateRecord = (record: EditableRecord): ValidationErrors => {
@@ -95,8 +94,7 @@ export default function EditableTable() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<null | string>(null);
-  const [deleteModalOpen, { close: closeDeleteModal, open: openDeleteModal }] =
-    useDisclosure(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -112,11 +110,9 @@ export default function EditableTable() {
       const errorMessage =
         error_ instanceof Error ? error_.message : "Failed to fetch data";
       setError(errorMessage);
-      notifications.show({
-        color: "red",
-        icon: <IconAlertCircle />,
-        message: errorMessage,
-        title: "Error",
+      toast.error("Error", {
+        description: errorMessage,
+        icon: <AlertCircle className="h-4 w-4" />,
       });
     } finally {
       setLoading(false);
@@ -176,10 +172,8 @@ export default function EditableTable() {
         currentData.map(row => (row.id === editingRowId ? savedRecord : row))
       );
 
-      notifications.show({
-        color: "green",
-        message: `Record ${isNew ? "created" : "updated"} successfully`,
-        title: "Success",
+      toast.success("Success", {
+        description: `Record ${isNew ? "created" : "updated"} successfully`,
       });
 
       setEditingRowId(null);
@@ -188,24 +182,19 @@ export default function EditableTable() {
     } catch (error_) {
       const errorMessage =
         error_ instanceof Error ? error_.message : "Failed to save record";
-      notifications.show({
-        color: "red",
-        icon: <IconAlertCircle />,
-        message: errorMessage,
-        title: "Error",
+      toast.error("Error", {
+        description: errorMessage,
+        icon: <AlertCircle className="h-4 w-4" />,
       });
     } finally {
       setSaving(false);
     }
   }, [editedRow, editingRowId]);
 
-  const openDeleteConfirmModal = useCallback(
-    (id: number | string) => {
-      setRowToDelete(id);
-      openDeleteModal();
-    },
-    [openDeleteModal]
-  );
+  const openDeleteConfirmModal = useCallback((id: number | string) => {
+    setRowToDelete(id);
+    setDeleteModalOpen(true);
+  }, []);
 
   const confirmDelete = useCallback(async () => {
     if (rowToDelete === null) {
@@ -222,31 +211,27 @@ export default function EditableTable() {
       }
 
       setData(currentData => currentData.filter(row => row.id !== rowToDelete));
-      notifications.show({
-        color: "green",
-        message: "Record deleted successfully",
-        title: "Success",
+      toast.success("Success", {
+        description: "Record deleted successfully",
       });
     } catch (error_) {
       const errorMessage =
         error_ instanceof Error ? error_.message : "Failed to delete record";
-      notifications.show({
-        color: "red",
-        icon: <IconAlertCircle />,
-        message: errorMessage,
-        title: "Error",
+      toast.error("Error", {
+        description: errorMessage,
+        icon: <AlertCircle className="h-4 w-4" />,
       });
     } finally {
-      closeDeleteModal();
+      setDeleteModalOpen(false);
       setRowToDelete(null);
     }
-  }, [rowToDelete, closeDeleteModal]);
+  }, [rowToDelete]);
 
   const addRow = useCallback(() => {
     const newRow: EditableRecord = {
       bought: false,
       customer: "",
-      date: convertPickerOutputToString(new Date()),
+      date: convertDateToString(new Date()),
       id: `new-${Date.now()}`,
     };
     setData(previous => [newRow, ...previous]);
@@ -257,7 +242,6 @@ export default function EditableTable() {
 
   const updateEditedRow = useCallback((updates: Partial<EditableRecord>) => {
     setEditedRow(previous => (previous ? { ...previous, ...updates } : null));
-    // Clear validation errors for fields being updated
     setValidationErrors(previous => {
       const newErrors = { ...previous };
       for (const key of Object.keys(updates)) {
@@ -269,184 +253,234 @@ export default function EditableTable() {
 
   if (loading) {
     return (
-      <Stack align="center" p="xl">
-        <Loader size="lg" />
-        <Text>Loading data...</Text>
-      </Stack>
+      <div className="flex flex-col items-center justify-center space-y-4 p-8">
+        <Loader2 className="h-8 w-8 animate-spin" />
+        <p className="text-gray-600">Loading data...</p>
+      </div>
     );
   }
 
   if (error && data.length === 0) {
     return (
-      <Alert
-        color="red"
-        icon={<IconAlertCircle />}
-        title="Error loading data"
-        variant="light"
-      >
-        <Text>{error}</Text>
-        <Button mt="md" onClick={fetchData} variant="light">
-          Retry
-        </Button>
+      <Alert className="max-w-2xl">
+        <AlertCircle className="h-4 w-4" />
+        <AlertDescription className="space-y-4">
+          <div>
+            <strong>Error loading data</strong>
+            <p>{error}</p>
+          </div>
+          <Button onClick={fetchData} variant="outline">
+            Retry
+          </Button>
+        </AlertDescription>
       </Alert>
     );
   }
 
-  const rows = data.map(row => {
-    const isEditing = editingRowId === row.id;
-    const isExistingRecord = isPersistentId(row.id);
-
-    return (
-      <Table.Tr key={row.id}>
-        {/* Actions Column */}
-        <Table.Td>
-          {isEditing ? (
-            <Group gap="xs">
-              <ActionIcon
-                aria-label="Cancel"
-                color="gray"
-                disabled={saving}
-                onClick={cancelEditing}
-              >
-                <IconX />
-              </ActionIcon>
-              <ActionIcon
-                aria-label="Save"
-                color="green"
-                loading={saving}
-                onClick={saveRow}
-              >
-                <IconDeviceFloppy />
-              </ActionIcon>
-            </Group>
-          ) : (
-            <Group gap="xs">
-              <ActionIcon
-                aria-label="Edit"
-                color="blue"
-                onClick={() => startEditing(row)}
-              >
-                <IconEdit />
-              </ActionIcon>
-              {isExistingRecord && (
-                <ActionIcon
-                  aria-label="Delete"
-                  color="red"
-                  onClick={() => openDeleteConfirmModal(row.id)}
-                >
-                  <IconTrash />
-                </ActionIcon>
-              )}
-            </Group>
-          )}
-        </Table.Td>
-
-        {/* Bought Column */}
-        <Table.Td>
-          {isEditing ? (
-            <Checkbox
-              checked={editedRow?.bought || false}
-              disabled={saving}
-              onChange={event =>
-                updateEditedRow({ bought: event.currentTarget.checked })
-              }
-            />
-          ) : (
-            <Checkbox checked={row.bought} readOnly />
-          )}
-        </Table.Td>
-
-        {/* Customer Column */}
-        <Table.Td>
-          {isEditing ? (
-            <Stack gap="xs">
-              <TextInput
-                disabled={saving}
-                error={validationErrors.customer}
-                onChange={event =>
-                  updateEditedRow({ customer: event.currentTarget.value })
-                }
-                placeholder="Enter customer name"
-                value={editedRow?.customer || ""}
-              />
-            </Stack>
-          ) : (
-            <Text>{row.customer || <Text c="dimmed">No customer</Text>}</Text>
-          )}
-        </Table.Td>
-
-        {/* Date Column */}
-        <Table.Td>
-          {isEditing ? (
-            <Stack gap="xs">
-              <DatePickerInput
-                disabled={saving}
-                error={validationErrors.date}
-                onChange={value =>
-                  updateEditedRow({ date: convertPickerOutputToString(value) })
-                }
-                placeholder="Select date"
-                value={parseYMDStringToDate(editedRow?.date)}
-              />
-            </Stack>
-          ) : (
-            <Text>{row.date || <Text c="dimmed">No date</Text>}</Text>
-          )}
-        </Table.Td>
-      </Table.Tr>
-    );
-  });
-
   return (
-    <Stack>
-      <Group>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
         <Button
+          className="gap-2"
           disabled={editingRowId !== null}
-          leftSection={<IconPlus />}
           onClick={addRow}
         >
+          <Plus className="h-4 w-4" />
           Add Row
         </Button>
-      </Group>
+        {editingRowId !== null && (
+          <p className="text-sm text-orange-600">
+            Finish editing the current row before adding a new one
+          </p>
+        )}
+      </div>
 
       {data.length === 0 ? (
-        <Alert color="blue" title="No data available" variant="light">
-          <Text>
-            No records found. Click Add Row to create your first record.
-          </Text>
+        <Alert>
+          <AlertDescription>
+            <div>
+              <strong>No data available</strong>
+              <p>
+                No records found. Click &quot;Add Row&quot; to create your first
+                record.
+              </p>
+            </div>
+          </AlertDescription>
         </Alert>
       ) : (
-        <Table highlightOnHover striped withColumnBorders>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Actions</Table.Th>
-              <Table.Th>Bought</Table.Th>
-              <Table.Th>Customer</Table.Th>
-              <Table.Th>Date</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>{rows}</Table.Tbody>
-        </Table>
+        <div className="rounded-lg border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-32">Actions</TableHead>
+                <TableHead className="w-32">Bought</TableHead>
+                <TableHead>Customer</TableHead>
+                <TableHead>Date</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.map(row => {
+                const isEditing = editingRowId === row.id;
+                const isExistingRecord = isPersistentId(row.id);
+
+                return (
+                  <TableRow key={row.id}>
+                    {/* Actions */}
+                    <TableCell className="w-32">
+                      {isEditing ? (
+                        <div className="flex gap-2">
+                          <Button
+                            aria-label="Cancel editing"
+                            className="h-8 w-8 p-0"
+                            disabled={saving}
+                            onClick={cancelEditing}
+                            size="sm"
+                            variant="ghost"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            aria-label="Save changes"
+                            className="h-8 w-8 p-0"
+                            disabled={saving}
+                            onClick={saveRow}
+                            size="sm"
+                            variant="default"
+                          >
+                            {saving ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Save className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="flex gap-2">
+                          <Button
+                            aria-label="Edit row"
+                            className="h-8 w-8 p-0"
+                            onClick={() => startEditing(row)}
+                            size="sm"
+                            variant="ghost"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          {isExistingRecord && (
+                            <Button
+                              aria-label="Delete row"
+                              className={`
+                                h-8 w-8 p-0 text-red-600
+                                hover:bg-red-50 hover:text-red-700
+                              `}
+                              onClick={() => openDeleteConfirmModal(row.id)}
+                              size="sm"
+                              variant="ghost"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      )}
+                    </TableCell>
+
+                    {/* Bought */}
+                    <TableCell className="w-32">
+                      {isEditing ? (
+                        <Checkbox
+                          checked={editedRow?.bought || false}
+                          disabled={saving}
+                          onCheckedChange={checked =>
+                            updateEditedRow({ bought: !!checked })
+                          }
+                        />
+                      ) : (
+                        <Checkbox checked={row.bought} disabled />
+                      )}
+                    </TableCell>
+
+                    {/* Customer */}
+                    <TableCell>
+                      {isEditing ? (
+                        <div className="space-y-1">
+                          <Input
+                            className={
+                              validationErrors.customer ? "border-red-500" : ""
+                            }
+                            disabled={saving}
+                            onChange={event =>
+                              updateEditedRow({ customer: event.target.value })
+                            }
+                            placeholder="Enter customer name"
+                            value={editedRow?.customer || ""}
+                          />
+                          {validationErrors.customer && (
+                            <p className="text-sm text-red-500">
+                              {validationErrors.customer}
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <span className={row.customer ? "" : "text-gray-400"}>
+                          {row.customer || "No customer"}
+                        </span>
+                      )}
+                    </TableCell>
+
+                    {/* Date */}
+                    <TableCell>
+                      {isEditing ? (
+                        <div className="space-y-1">
+                          <Input
+                            className={
+                              validationErrors.date ? "border-red-500" : ""
+                            }
+                            disabled={saving}
+                            onChange={event =>
+                              updateEditedRow({ date: event.target.value })
+                            }
+                            type="date"
+                            value={parseStringToDate(editedRow?.date)}
+                          />
+                          {validationErrors.date && (
+                            <p className="text-sm text-red-500">
+                              {validationErrors.date}
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <span className={row.date ? "" : "text-gray-400"}>
+                          {row.date || "No date"}
+                        </span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
       )}
 
-      <Modal
-        onClose={closeDeleteModal}
-        opened={deleteModalOpen}
-        title="Confirm Delete"
-      >
-        <Text mb="md">
-          Are you sure you want to delete this record? This action cannot be
-          undone.
-        </Text>
-        <Group>
-          <Button color="red" onClick={confirmDelete}>
-            Delete
-          </Button>
-          <Button onClick={closeDeleteModal} variant="default">
-            Cancel
-          </Button>
-        </Group>
-      </Modal>
-    </Stack>
+      {/* Delete Confirmation Dialog */}
+      <Dialog onOpenChange={setDeleteModalOpen} open={deleteModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm Delete</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this record? This action cannot be
+              undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={() => setDeleteModalOpen(false)} variant="outline">
+              Cancel
+            </Button>
+            <Button onClick={confirmDelete} variant="destructive">
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }

@@ -1,22 +1,43 @@
 "use client";
 
-import { Pagination } from "@mantine/core";
-import { useDebouncedValue } from "@mantine/hooks";
 import {
   QueryClient,
   QueryClientProvider,
   useQuery,
 } from "@tanstack/react-query";
 import {
-  type Cell,
   type ColumnDef,
   flexRender,
   getCoreRowModel,
-  type Header,
   type HeaderGroup,
   type Row,
   useReactTable,
 } from "@tanstack/react-table";
+import { AlertCircle, Loader2 } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+
+import { FilterPanel } from "./filter-panel";
+
+// Type Definitions
 export type InfiniteQueryPage = {
   items: Entity[];
   nextPage?: number;
@@ -65,16 +86,31 @@ type ReusableDataTableProperties<T = any> = {
 };
 
 type TableColumn<T> = ColumnDef<T, any>;
-import React, { useCallback, useMemo, useState } from "react";
 
-import { FilterPanel } from "./filter-panel";
-
+// Helper Functions
 function generateInitialState(configs: FilterConfig[]): FiltersState {
   const initialState: FiltersState = {};
   for (const config of configs) {
     initialState[config.key] = { search: "", selected: null };
   }
   return initialState;
+}
+
+// Custom Debounce Hook
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState<T>(value);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [value, delay]);
+
+  return debouncedValue;
 }
 
 const fetchTableData = async <T,>(
@@ -110,6 +146,42 @@ const fetchTableData = async <T,>(
   };
 };
 
+const generatePaginationRange = (
+  currentPage: number,
+  totalPages: number
+): (number | string)[] => {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+
+  if (currentPage <= 4) {
+    return [1, 2, 3, 4, 5, "...", totalPages];
+  }
+
+  if (currentPage >= totalPages - 3) {
+    return [
+      1,
+      "...",
+      totalPages - 4,
+      totalPages - 3,
+      totalPages - 2,
+      totalPages - 1,
+      totalPages,
+    ];
+  }
+
+  return [
+    1,
+    "...",
+    currentPage - 1,
+    currentPage,
+    currentPage + 1,
+    "...",
+    totalPages,
+  ];
+};
+
+// Custom Hook for Data Fetching
 const useTableData = <T,>(
   filters: FiltersState,
   filterConfigs: FilterConfig[],
@@ -137,6 +209,7 @@ const useTableData = <T,>(
   });
 };
 
+// Main Component Wrapper
 export function ReusableDataTable<T = any>({
   apiConfig,
   columnConfigs,
@@ -165,18 +238,17 @@ export function ReusableDataTable<T = any>({
   );
 }
 
+// Inner Component with Logic
 function ReusableDataTableInner<T>({
   apiConfig,
   columnConfigs,
-  containerStyle,
   filterConfigs,
   pageSize,
-  tableStyle,
 }: ReusableDataTableProperties<T>) {
   const [filters, setFilters] = useState<FiltersState>(() =>
     generateInitialState(filterConfigs)
   );
-  const [debouncedFilters] = useDebouncedValue(filters, 300);
+  const debouncedFilters = useDebounce(filters, 300);
   const [currentPage, setCurrentPage] = useState(1);
 
   const tableDataQuery = useTableData<T>(
@@ -220,201 +292,179 @@ function ReusableDataTableInner<T>({
     [tableDataQuery.data, pageSize]
   );
 
+  const paginationRange = useMemo(
+    () => generatePaginationRange(currentPage, totalPages),
+    [currentPage, totalPages]
+  );
+
   const table = useReactTable({
     columns: columnConfigs,
     data: tableDataQuery.data?.data ?? [],
     getCoreRowModel: getCoreRowModel(),
   });
 
+  const handlePageChange = (page: number) => {
+    if (page > 0 && page <= totalPages) {
+      setCurrentPage(page);
+    }
+  };
+
   if (tableDataQuery.isError) {
     return (
-      <div
-        style={{
-          backgroundColor: "#ffebee",
-          borderRadius: "4px",
-          color: "#d32f2f",
-          padding: "2rem",
-          textAlign: "center",
-        }}
-      >
-        <h3>Error Loading Data</h3>
-        <p>
-          {tableDataQuery.error instanceof Error
-            ? tableDataQuery.error.message
-            : "Unknown error occurred"}
-        </p>
-      </div>
+      <Alert className="max-w-2xl">
+        <AlertCircle className="h-4 w-4" />
+        <AlertDescription className="space-y-4">
+          <div>
+            <strong>Error loading data</strong>
+            <p>
+              {tableDataQuery.error instanceof Error
+                ? tableDataQuery.error.message
+                : "An unknown error occurred"}
+            </p>
+          </div>
+        </AlertDescription>
+      </Alert>
     );
   }
 
   return (
-    <div style={{ padding: "2rem" }}>
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: "2rem",
-          maxWidth: "100%",
-          ...containerStyle,
-        }}
-      >
-        <FilterPanel
-          apiConfig={apiConfig}
-          debouncedFilters={debouncedFilters}
-          filterConfigs={filterConfigs}
-          filters={filters}
-          onClearFilters={handleClearFilters}
-          onSearchChange={handleSearchChange}
-          onSelectChange={handleSelectChange}
-        />
+    <div className="space-y-6">
+      <FilterPanel
+        apiConfig={apiConfig}
+        debouncedFilters={debouncedFilters}
+        filterConfigs={filterConfigs}
+        filters={filters}
+        onClearFilters={handleClearFilters}
+        onSearchChange={handleSearchChange}
+        onSelectChange={handleSelectChange}
+      />
 
-        <div style={{ flex: 1, minWidth: 0 }}>
-          {tableDataQuery.isLoading && (
-            <div
-              style={{
-                backgroundColor: "#f5f5f5",
-                borderRadius: "4px",
-                color: "#666",
-                padding: "2rem",
-                textAlign: "center",
-              }}
-            >
-              Loading data...
-            </div>
+      <div className="space-y-4">
+        {tableDataQuery.isLoading && (
+          <div className="flex flex-col items-center justify-center space-y-4 p-8">
+            <Loader2 className="h-8 w-8 animate-spin" />
+            <p className="text-gray-600">Loading data...</p>
+          </div>
+        )}
+
+        {!tableDataQuery.isLoading &&
+          tableDataQuery.data?.data.length === 0 && (
+            <Alert>
+              <AlertDescription>
+                <div>
+                  <strong>No data available</strong>
+                  <p>Try adjusting your filters to see results.</p>
+                </div>
+              </AlertDescription>
+            </Alert>
           )}
 
-          {!tableDataQuery.isLoading &&
-            tableDataQuery.data?.data.length === 0 && (
-              <div
-                style={{
-                  backgroundColor: "#f9f9f9",
-                  borderRadius: "4px",
-                  color: "#666",
-                  padding: "2rem",
-                  textAlign: "center",
-                }}
-              >
-                <h3>No Data Found</h3>
-                <p>Try adjusting your filters to see results.</p>
-              </div>
-            )}
-
-          {!tableDataQuery.isLoading &&
-            tableDataQuery.data &&
-            tableDataQuery.data.data.length > 0 && (
-              <>
-                <div
-                  style={{
-                    backgroundColor: "white",
-                    border: "1px solid #e0e0e0",
-                    borderRadius: "4px",
-                    overflow: "hidden",
-                    ...tableStyle,
-                  }}
-                >
-                  <table style={{ borderCollapse: "collapse", width: "100%" }}>
-                    <thead style={{ backgroundColor: "#f5f5f5" }}>
-                      {table
-                        .getHeaderGroups()
-                        .map((headerGroup: HeaderGroup<T>) => (
-                          <tr key={headerGroup.id}>
-                            {headerGroup.headers.map(
-                              (header: Header<T, unknown>) => (
-                                <th
-                                  key={header.id}
-                                  style={{
-                                    borderBottom: "2px solid #e0e0e0",
-                                    borderRight: "1px solid #e0e0e0",
-                                    fontWeight: 600,
-                                    padding: "0.75rem",
-                                    textAlign: "left",
-
-                                    ...(headerGroup.headers.at(-1) &&
-                                      header.id ===
-                                        headerGroup.headers.at(-1)!.id && {
-                                        borderRight: "none",
-                                      }),
-                                  }}
-                                >
-                                  {header.isPlaceholder
-                                    ? null
-                                    : flexRender(
-                                        header.column.columnDef.header,
-                                        header.getContext()
-                                      )}
-                                </th>
-                              )
-                            )}
-                          </tr>
-                        ))}
-                    </thead>
-                    <tbody>
-                      {table.getRowModel().rows.map((row: Row<T>) => (
-                        <tr
-                          key={row.id}
-                          onMouseEnter={event => {
-                            event.currentTarget.style.backgroundColor =
-                              "#fafafa";
-                          }}
-                          onMouseLeave={event => {
-                            event.currentTarget.style.backgroundColor =
-                              "transparent";
-                          }}
-                          style={{
-                            backgroundColor: "transparent",
-                            borderBottom: "1px solid #f0f0f0",
-                            transition: "background-color 0.2s ease",
-                          }}
-                        >
-                          {row
-                            .getVisibleCells()
-                            .map((cell: Cell<T, unknown>, index, array) => (
-                              <td
-                                key={cell.id}
-                                style={{
-                                  borderBottom: "1px solid #f0f0f0",
-                                  borderRight: "1px solid #e0e0e0",
-                                  padding: "0.75rem",
-
-                                  ...(index === array.length - 1 && {
-                                    borderRight: "none",
-                                  }),
-                                }}
-                              >
-                                {flexRender(
-                                  cell.column.columnDef.cell,
-                                  cell.getContext()
-                                )}
-                              </td>
-                            ))}
-                        </tr>
+        {!tableDataQuery.isLoading &&
+          tableDataQuery.data &&
+          tableDataQuery.data.data.length > 0 && (
+            <>
+              <div className="rounded-lg border">
+                <Table>
+                  <TableHeader>
+                    {table
+                      .getHeaderGroups()
+                      .map((headerGroup: HeaderGroup<T>) => (
+                        <TableRow key={headerGroup.id}>
+                          {headerGroup.headers.map(header => (
+                            <TableHead key={header.id}>
+                              {header.isPlaceholder
+                                ? null
+                                : flexRender(
+                                    header.column.columnDef.header,
+                                    header.getContext()
+                                  )}
+                            </TableHead>
+                          ))}
+                        </TableRow>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
+                  </TableHeader>
+                  <TableBody>
+                    {table.getRowModel().rows?.length ? (
+                      table.getRowModel().rows.map((row: Row<T>) => (
+                        <TableRow
+                          data-state={row.getIsSelected() && "selected"}
+                          key={row.id}
+                        >
+                          {row.getVisibleCells().map(cell => (
+                            <TableCell key={cell.id}>
+                              {flexRender(
+                                cell.column.columnDef.cell,
+                                cell.getContext()
+                              )}
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell
+                          className="h-24 text-center"
+                          colSpan={columnConfigs.length}
+                        >
+                          No results.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
 
-                {totalPages > 1 && (
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "center",
-                      marginTop: "1rem",
-                    }}
-                  >
-                    <Pagination
-                      boundaries={1}
-                      onChange={setCurrentPage}
-                      siblings={1}
-                      size="sm"
-                      total={totalPages}
-                      value={currentPage}
-                      withEdges
-                    />
-                  </div>
-                )}
-              </>
-            )}
-        </div>
+              {totalPages > 1 && (
+                <div className="mt-4 flex justify-center">
+                  <Pagination>
+                    <PaginationContent>
+                      <PaginationItem>
+                        <PaginationPrevious
+                          href="#"
+                          onClick={event => {
+                            event.preventDefault();
+                            handlePageChange(currentPage - 1);
+                          }}
+                        />
+                      </PaginationItem>
+                      {paginationRange.map((page, index) => {
+                        if (typeof page === "string") {
+                          return (
+                            <PaginationItem key={`ellipsis-${index}`}>
+                              <PaginationEllipsis />
+                            </PaginationItem>
+                          );
+                        }
+                        return (
+                          <PaginationItem key={page}>
+                            <PaginationLink
+                              href="#"
+                              isActive={currentPage === page}
+                              onClick={event => {
+                                event.preventDefault();
+                                handlePageChange(page);
+                              }}
+                            >
+                              {page}
+                            </PaginationLink>
+                          </PaginationItem>
+                        );
+                      })}
+                      <PaginationItem>
+                        <PaginationNext
+                          href="#"
+                          onClick={event => {
+                            event.preventDefault();
+                            handlePageChange(currentPage + 1);
+                          }}
+                        />
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
+                </div>
+              )}
+            </>
+          )}
       </div>
     </div>
   );

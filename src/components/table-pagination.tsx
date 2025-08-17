@@ -26,20 +26,20 @@ export const ApiBasedProductTable = () => {
     {
       apiField: "user_name",
       key: "user",
-      label: "Select a User",
-      placeholder: "Search for a user...",
+      label: "User",
+      placeholder: "Select User",
     },
     {
       apiField: "store_name",
       key: "store",
-      label: "Select a Store",
-      placeholder: "Search for a store...",
+      label: "Store",
+      placeholder: "Select Store",
     },
     {
       apiField: "product_name",
       key: "product",
-      label: "Select a Product",
-      placeholder: "Search for a product...",
+      label: "Product",
+      placeholder: "Select Product",
     },
   ];
 

@@ -2,7 +2,7 @@
 
 import { createColumnHelper } from "@tanstack/react-table";
 
-import { ReusableDataTable } from "./table";
+import { ReusableDataTable } from "../src/components/table";
 
 type ProductData = {
   product_name: string;

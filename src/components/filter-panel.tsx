@@ -1,8 +1,9 @@
 "use client";
 
-import { Button } from "@mantine/core";
 import { InfiniteData, useInfiniteQuery } from "@tanstack/react-query";
 import React, { useMemo } from "react";
+
+import { Button } from "@/components/ui/button";
 
 import { InfiniteSearchableSelect } from "./infinite-select";
 

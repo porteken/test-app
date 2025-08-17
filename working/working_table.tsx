@@ -67,7 +67,7 @@ type ReusableDataTableProperties<T = any> = {
 type TableColumn<T> = ColumnDef<T, any>;
 import React, { useCallback, useMemo, useState } from "react";
 
-import { FilterPanel } from "./filter-panel";
+import { FilterPanel } from "../src/components/filter-panel";
 
 function generateInitialState(configs: FilterConfig[]): FiltersState {
   const initialState: FiltersState = {};

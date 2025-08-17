@@ -4,7 +4,9 @@
   },
   "chat.tools.autoApprove": true,
   "tailwindCSS.experimental.classRegex": [
-    ["className\\s*:\\s*['\"]([^'\"]*)['\"]"]
+    [
+      "className\\s*:\\s*['\"]([^'\"]*)['\"]"
+    ]
   ],
   "javascript.updateImportsOnFileMove.enabled": "always",
   "typescript.updateImportsOnFileMove.enabled": "always",
