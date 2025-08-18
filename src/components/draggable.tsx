@@ -15,38 +15,12 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import {
-  AlertCircle,
-  Edit,
-  GripVertical,
-  Loader2,
-  Plus,
-  Save,
-  Trash2,
-  X,
-} from "lucide-react";
+import { AlertCircle, GripVertical, Loader2, Plus } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -56,28 +30,22 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-// -------------------- Types --------------------
-export interface ColumnConfig<T> {
-  key: keyof T;
-  label: string;
-  options?: { label: string; value: string }[];
-  placeholder?: string;
-  render?: (value: T[keyof T], row: T) => React.ReactNode;
-  type?: "checkbox" | "date" | "select" | "text";
-  validate?: (value: T[keyof T], row: T) => null | string;
-}
+import {
+  ActionButtons,
+  CellRenderer,
+  ColumnConfig,
+  DeleteDialog,
+  isPersistentId,
+} from "./table-common";
 
+// -------------------- Props --------------------
 interface DraggableEditableTableProperties<T extends { id: number | string }> {
   apiBaseUrl: string;
   columns: ColumnConfig<T>[];
   createNewRow: (position: number) => T;
 }
 
-// -------------------- Helpers --------------------
-const isPersistentId = (id: number | string | undefined): boolean =>
-  typeof id === "number" || (typeof id === "string" && /^\d+$/.test(id));
-
-// -------------------- Main Component --------------------
+// -------------------- Component --------------------
 export function DraggableEditableTable<T extends { id: number | string }>({
   apiBaseUrl,
   columns,
@@ -100,12 +68,16 @@ export function DraggableEditableTable<T extends { id: number | string }>({
   const sortableIds = useMemo(() => data.map(item => item.id), [data]);
   const hasUnsavedChanges = editingRowId !== null;
 
-  // Fetch
+  // -------------------- Fetch --------------------
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const result = await request<T[]>(apiBaseUrl);
+      const response = await fetch(apiBaseUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch: ${response.statusText}`);
+      }
+      const result = await response.json();
       setData(result);
     } catch (error_) {
       const errorMessage =
@@ -121,12 +93,12 @@ export function DraggableEditableTable<T extends { id: number | string }>({
     fetchData();
   }, [fetchData]);
 
-  // Drag sensors
+  // -------------------- Drag sensors --------------------
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 10 } })
   );
 
-  // Handle drag end
+  // -------------------- Handle drag end --------------------
   const handleDragEnd = useCallback(
     async (event: DragEndEvent) => {
       const { active, over } = event;
@@ -146,8 +118,9 @@ export function DraggableEditableTable<T extends { id: number | string }>({
       try {
         await Promise.all(
           reordered.map((row, index) =>
-            request(`${apiBaseUrl}/${row.id}`, {
+            fetch(`${apiBaseUrl}/${row.id}`, {
               body: JSON.stringify({ ...row, position: index }),
+              headers: { "Content-Type": "application/json" },
               method: "PUT",
             })
           )
@@ -163,7 +136,7 @@ export function DraggableEditableTable<T extends { id: number | string }>({
     [data, apiBaseUrl, fetchData]
   );
 
-  // Editing
+  // -------------------- Editing --------------------
   const startEditing = useCallback((row: T) => {
     setEditingRowId(row.id);
     setEditedRow({ ...row });
@@ -205,10 +178,15 @@ export function DraggableEditableTable<T extends { id: number | string }>({
 
     try {
       setSaving(true);
-      const saved = await request<T>(url, {
+      const response = await fetch(url, {
         body: JSON.stringify(editedRow),
+        headers: { "Content-Type": "application/json" },
         method,
       });
+      if (!response.ok) {
+        throw new Error(`Failed to save: ${response.statusText}`);
+      }
+      const saved = await response.json();
 
       setData(current =>
         isNew
@@ -229,7 +207,7 @@ export function DraggableEditableTable<T extends { id: number | string }>({
     }
   }, [editedRow, apiBaseUrl, columns]);
 
-  // Delete
+  // -------------------- Delete --------------------
   const openDeleteConfirmModal = useCallback((id: number | string) => {
     setRowToDelete(id);
     setDeleteModalOpen(true);
@@ -239,8 +217,9 @@ export function DraggableEditableTable<T extends { id: number | string }>({
     if (rowToDelete === null) {
       return;
     }
+
     try {
-      await request(`${apiBaseUrl}/${rowToDelete}`, { method: "DELETE" });
+      await fetch(`${apiBaseUrl}/${rowToDelete}`, { method: "DELETE" });
       setData(current => current.filter(r => r.id !== rowToDelete));
       toast.success("Record deleted");
     } catch (error_) {
@@ -253,14 +232,14 @@ export function DraggableEditableTable<T extends { id: number | string }>({
     }
   }, [rowToDelete, apiBaseUrl]);
 
-  // Add
+  // -------------------- Add --------------------
   const addRow = useCallback(() => {
     const newRow = createNewRow(data.length);
     setData(previous => [newRow, ...previous]);
     startEditing(newRow);
   }, [createNewRow, data.length, startEditing]);
 
-  // Update edited row
+  // -------------------- Update Edited Row --------------------
   const updateEditedRow = useCallback(
     <K extends keyof T>(key: K, value: T[K]) => {
       setEditedRow(previous =>
@@ -360,115 +339,13 @@ export function DraggableEditableTable<T extends { id: number | string }>({
       </div>
 
       {/* Delete Confirmation */}
-      <Dialog onOpenChange={setDeleteModalOpen} open={deleteModalOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Confirm Delete</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete this record?
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button onClick={() => setDeleteModalOpen(false)} variant="outline">
-              Cancel
-            </Button>
-            <Button onClick={confirmDelete} variant="destructive">
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DeleteDialog
+        onClose={() => setDeleteModalOpen(false)}
+        onConfirm={confirmDelete}
+        open={deleteModalOpen}
+      />
     </div>
   );
-}
-
-// -------------------- Cell Renderer --------------------
-function renderCell<T extends { id: number | string }>(
-  col: ColumnConfig<T>,
-  value: T[keyof T] | undefined,
-  row: T,
-  isEditing: boolean,
-  saving: boolean,
-  errorMessage: string | undefined,
-  updateEditedRow: <K extends keyof T>(key: K, value: T[K]) => void
-) {
-  const isCheckbox = col.type === "checkbox" || typeof value === "boolean";
-
-  if (isEditing) {
-    if (isCheckbox) {
-      return (
-        <Checkbox
-          checked={!!value}
-          disabled={saving}
-          onCheckedChange={checked =>
-            updateEditedRow(col.key, !!checked as T[keyof T])
-          }
-        />
-      );
-    }
-
-    if (col.type === "select" && col.options) {
-      return (
-        <Select
-          disabled={saving}
-          onValueChange={value_ =>
-            updateEditedRow(col.key, value_ as T[keyof T])
-          }
-          value={String(value ?? "")}
-        >
-          <SelectTrigger>
-            <SelectValue placeholder={col.placeholder} />
-          </SelectTrigger>
-          <SelectContent>
-            {col.options.map(opt => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      );
-    }
-
-    return (
-      <div className="space-y-1">
-        <Input
-          className={errorMessage ? "border-red-500" : ""}
-          disabled={saving}
-          onChange={event_ =>
-            updateEditedRow(col.key, event_.target.value as T[keyof T])
-          }
-          placeholder={col.placeholder}
-          type={col.type === "date" ? "date" : "text"}
-          value={String(value ?? "")}
-        />
-        {errorMessage && <p className="text-sm text-red-500">{errorMessage}</p>}
-      </div>
-    );
-  }
-
-  // View mode
-  if (col.render) {
-    return col.render(value as T[keyof T], row);
-  }
-  if (isCheckbox) {
-    return <Checkbox checked={!!value} disabled />;
-  }
-  return (
-    <span className={value ? "" : "text-gray-400"}>{String(value ?? "—")}</span>
-  );
-}
-
-async function request<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(errorText || response.statusText);
-  }
-  return response.json();
 }
 
 // -------------------- Sortable Row --------------------
@@ -516,6 +393,7 @@ function SortableRow<T extends { id: number | string }>(properties: {
   };
 
   const isExistingRecord = isPersistentId(row.id);
+  const safeRow = (isEditing ? editedRow : row) as T;
 
   return (
     <TableRow
@@ -539,73 +417,33 @@ function SortableRow<T extends { id: number | string }>(properties: {
 
       {/* Actions */}
       <TableCell className="w-32">
-        {isEditing ? (
-          <div className="flex gap-2">
-            <Button
-              className="h-8 w-8 p-0"
-              disabled={saving}
-              onClick={cancelEditing}
-              size="sm"
-              variant="ghost"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-            <Button
-              className="h-8 w-8 p-0"
-              disabled={saving || Object.keys(validationErrors).length > 0}
-              onClick={saveRow}
-              size="sm"
-              variant="default"
-            >
-              {saving ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Save className="h-4 w-4" />
-              )}
-            </Button>
-          </div>
-        ) : (
-          <div className="flex gap-2">
-            <Button
-              className="h-8 w-8 p-0"
-              onClick={() => startEditing(row)}
-              size="sm"
-              variant="ghost"
-            >
-              <Edit className="h-4 w-4" />
-            </Button>
-            {isExistingRecord && (
-              <Button
-                className={`
-                  h-8 w-8 p-0 text-red-600
-                  hover:bg-red-50
-                `}
-                onClick={() => openDeleteConfirmModal(row.id)}
-                size="sm"
-                variant="ghost"
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            )}
-          </div>
-        )}
+        <ActionButtons
+          isEditing={isEditing}
+          isExistingRecord={isExistingRecord}
+          onCancel={cancelEditing}
+          onDelete={() => openDeleteConfirmModal(row.id)}
+          onEdit={() => startEditing(row)}
+          onSave={saveRow}
+          saving={saving}
+          validationErrors={validationErrors}
+        />
       </TableCell>
 
       {/* Dynamic Columns */}
       {columns.map(col => {
-        const value = (isEditing ? editedRow : row)?.[col.key];
+        const value = safeRow[col.key];
         const errorMessage = validationErrors[col.key as string];
         return (
           <TableCell key={String(col.key)}>
-            {renderCell(
-              col,
-              value,
-              row,
-              isEditing,
-              saving,
-              errorMessage,
-              updateEditedRow
-            )}
+            <CellRenderer
+              col={col}
+              errorMessage={errorMessage}
+              isEditing={isEditing}
+              row={row}
+              saving={saving}
+              updateEditedRow={updateEditedRow}
+              value={value}
+            />
           </TableCell>
         );
       })}

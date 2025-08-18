@@ -1,29 +1,11 @@
 "use client";
 
-import {
-  AlertCircle,
-  Edit,
-  Loader2,
-  Plus,
-  Save,
-  Trash2,
-  X,
-} from "lucide-react";
+import { AlertCircle, Loader2, Plus } from "lucide-react";
 import React, { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -33,33 +15,22 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-// -------------------- Types --------------------
-export interface ColumnConfig<T> {
-  key: keyof T;
-  label: string;
-  placeholder?: string;
-  render?: (value: T[keyof T], row: T) => React.ReactNode;
-  type?: "checkbox" | "date" | "text";
-  validate?: (value: T[keyof T], row: T) => null | string;
-}
+import {
+  ActionButtons,
+  CellRenderer,
+  ColumnConfig,
+  DeleteDialog,
+  formatDateForInput,
+  isPersistentId,
+} from "./table-common";
 
+// -------------------- Props --------------------
 interface EditableTableProperties<T extends { id: number | string }> {
   apiBaseUrl: string;
   columns: ColumnConfig<T>[];
 }
 
-// -------------------- Helpers --------------------
-const isPersistentId = (id: number | string | undefined): boolean =>
-  typeof id === "number" || (typeof id === "string" && /^\d+$/.test(id));
-
-const formatDateForInput = (date: Date | null): string => {
-  if (!date || Number.isNaN(date.getTime())) {
-    return "";
-  }
-  return date.toISOString().split("T")[0];
-};
-
-// -------------------- Generic Editable Table --------------------
+// -------------------- Component --------------------
 export function EditableTable<T extends { id: number | string }>({
   apiBaseUrl,
   columns,
@@ -190,6 +161,7 @@ export function EditableTable<T extends { id: number | string }>({
     if (rowToDelete === null) {
       return;
     }
+
     try {
       const response = await fetch(`${apiBaseUrl}/${rowToDelete}`, {
         method: "DELETE",
@@ -240,7 +212,7 @@ export function EditableTable<T extends { id: number | string }>({
     startEditing(newRow);
   }, [columns, startEditing]);
 
-  // -------------------- Update Edited Row (type-safe) --------------------
+  // -------------------- Update Edited Row --------------------
   const updateEditedRow = useCallback(
     <K extends keyof T>(key: K, value: T[K]) => {
       setEditedRow(previous =>
@@ -326,6 +298,7 @@ export function EditableTable<T extends { id: number | string }>({
               {data.map(row => {
                 const isEditing = editingRowId === row.id;
                 const isExistingRecord = isPersistentId(row.id);
+                const safeRow = (isEditing ? editedRow : row) as T;
 
                 return (
                   <TableRow
@@ -334,84 +307,33 @@ export function EditableTable<T extends { id: number | string }>({
                   >
                     {/* Actions */}
                     <TableCell>
-                      <div className="flex gap-2">
-                        {isEditing ? (
-                          <>
-                            <Button
-                              className="h-8 w-8"
-                              disabled={saving}
-                              onClick={cancelEditing}
-                              size="icon"
-                              variant="ghost"
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              className="h-8 w-8"
-                              disabled={
-                                saving ||
-                                Object.keys(validationErrors).length > 0
-                              }
-                              onClick={saveRow}
-                              size="icon"
-                              variant="default"
-                            >
-                              {saving ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Save className="h-4 w-4" />
-                              )}
-                            </Button>
-                          </>
-                        ) : (
-                          <>
-                            <Button
-                              className="h-8 w-8"
-                              onClick={() => startEditing(row)}
-                              size="icon"
-                              variant="ghost"
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                            {isExistingRecord && (
-                              <Button
-                                className={`
-                                  h-8 w-8 text-destructive
-                                  hover:bg-destructive/10 hover:text-destructive
-                                `}
-                                onClick={() => openDeleteConfirmModal(row.id)}
-                                size="icon"
-                                variant="ghost"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            )}
-                          </>
-                        )}
-                      </div>
+                      <ActionButtons
+                        isEditing={isEditing}
+                        isExistingRecord={isExistingRecord}
+                        onCancel={cancelEditing}
+                        onDelete={() => openDeleteConfirmModal(row.id)}
+                        onEdit={() => startEditing(row)}
+                        onSave={saveRow}
+                        saving={saving}
+                        validationErrors={validationErrors}
+                      />
                     </TableCell>
 
                     {/* Dynamic Columns */}
                     {columns.map(col => {
-                      if (isEditing && !editedRow) {
-                        return null;
-                      }
-
-                      const safeRow = (isEditing ? editedRow : row) as T;
                       const value = safeRow[col.key];
                       const errorMessage = validationErrors[col.key as string];
-
                       return (
                         <TableCell key={String(col.key)}>
-                          {renderCell(
-                            col,
-                            value,
-                            row,
-                            isEditing,
-                            saving,
-                            errorMessage,
-                            updateEditedRow
-                          )}
+                          <CellRenderer
+                            col={col}
+                            errorMessage={errorMessage}
+                            isEditing={isEditing}
+                            row={row}
+                            saving={saving}
+                            updateEditedRow={updateEditedRow}
+                            value={value}
+                          />
                         </TableCell>
                       );
                     })}
@@ -424,83 +346,11 @@ export function EditableTable<T extends { id: number | string }>({
       )}
 
       {/* Delete Confirmation Dialog */}
-      <Dialog onOpenChange={setDeleteModalOpen} open={deleteModalOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Confirm Deletion</DialogTitle>
-            <DialogDescription>
-              This action cannot be undone. Are you sure you want to permanently
-              delete this record?
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button onClick={() => setDeleteModalOpen(false)} variant="outline">
-              Cancel
-            </Button>
-            <Button onClick={confirmDelete} variant="destructive">
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DeleteDialog
+        onClose={() => setDeleteModalOpen(false)}
+        onConfirm={confirmDelete}
+        open={deleteModalOpen}
+      />
     </div>
-  );
-}
-
-// -------------------- Cell Renderer --------------------
-function renderCell<T extends { id: number | string }>(
-  col: ColumnConfig<T>,
-  value: T[keyof T],
-  row: T,
-  isEditing: boolean,
-  saving: boolean,
-  errorMessage: string | undefined,
-  updateEditedRow: <K extends keyof T>(key: K, value: T[K]) => void
-) {
-  const isCheckbox = col.type === "checkbox" || typeof value === "boolean";
-
-  if (isEditing) {
-    return (
-      <div className="space-y-1">
-        {isCheckbox ? (
-          <Checkbox
-            checked={!!value}
-            disabled={saving}
-            onCheckedChange={checked =>
-              updateEditedRow(col.key, !!checked as T[keyof T])
-            }
-          />
-        ) : (
-          <Input
-            className={errorMessage ? "border-destructive" : ""}
-            disabled={saving}
-            onChange={event_ =>
-              updateEditedRow(col.key, event_.target.value as T[keyof T])
-            }
-            placeholder={col.placeholder}
-            type={col.type === "date" ? "date" : "text"}
-            value={String(value ?? "")}
-          />
-        )}
-        {errorMessage && (
-          <p className="text-sm text-destructive">{errorMessage}</p>
-        )}
-      </div>
-    );
-  }
-
-  // View mode
-  if (isCheckbox) {
-    return <Checkbox checked={!!value} disabled />;
-  }
-
-  if (col.render) {
-    return col.render(value, row);
-  }
-
-  return (
-    <span className={value ? "" : "text-muted-foreground"}>
-      {String(value) || "—"}
-    </span>
   );
 }

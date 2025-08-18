@@ -7,10 +7,8 @@ import {
   getCoreRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { AlertCircle, Loader2 } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Pagination,
   PaginationContent,
@@ -30,6 +28,11 @@ import {
 } from "@/components/ui/table";
 
 import { FilterPanel } from "./filter-panel";
+import {
+  TableEmptyState,
+  TableErrorState,
+  TableLoadingState,
+} from "./table-common";
 
 // -------------------- Types --------------------
 export type InfiniteQueryPage<T> = {
@@ -70,7 +73,7 @@ type FiltersState = Record<string, Filter>;
 type ReusableDataTableProperties<T> = {
   apiConfig: ApiConfig;
   columnConfigs: ColumnDef<T, any>[];
-  filterConfigs: FilterConfig[];
+  filterConfigs?: FilterConfig[]; // ✅ optional now
   pageSize?: number;
   queryClient?: QueryClient;
   showDebugInfo?: boolean;
@@ -84,7 +87,7 @@ const STALE_TIME_MS = 30_000;
 const GC_TIME_MS = 5 * 60 * 1000;
 
 // -------------------- Helpers --------------------
-const generateInitialState = (configs: FilterConfig[]): FiltersState => {
+const generateInitialState = (configs: FilterConfig[] = []): FiltersState => {
   const accumulator: FiltersState = {};
   for (const config of configs) {
     accumulator[config.key] = { search: "", selected: null };
@@ -167,17 +170,19 @@ const generatePaginationRange = (
 // -------------------- Data Hook --------------------
 const useTableData = <T,>(
   filters: FiltersState,
-  filterConfigs: FilterConfig[],
+  filterConfigs: FilterConfig[] | undefined,
   apiConfig: ApiConfig,
   page: number,
   pageSize: number
 ) => {
   const apiFilters = useMemo(() => {
     const accumulator: Record<string, string> = {};
-    for (const config of filterConfigs) {
-      const selectedValue = filters[config.key]?.selected?.name;
-      if (selectedValue) {
-        accumulator[config.apiField] = selectedValue;
+    if (filterConfigs) {
+      for (const config of filterConfigs) {
+        const selectedValue = filters[config.key]?.selected?.name;
+        if (selectedValue) {
+          accumulator[config.apiField] = selectedValue;
+        }
       }
     }
     return accumulator;
@@ -270,173 +275,150 @@ export function ReusableDataTable<T>({
 
   // -------------------- Render --------------------
   if (isError) {
-    return (
-      <Alert className="max-w-2xl" variant="destructive">
-        <AlertCircle className="h-4 w-4" />
-        <AlertDescription>
-          <strong>Error loading data</strong>
-          <p>
-            {error instanceof Error
-              ? error.message
-              : "An unknown error occurred"}
-          </p>
-        </AlertDescription>
-      </Alert>
-    );
+    return <TableErrorState error={error} retry={() => setCurrentPage(1)} />;
   }
 
-  const renderTableContent = () => {
-    if (isLoading) {
-      return (
-        <div className="flex flex-col items-center justify-center space-y-4 p-8">
-          <Loader2 className="h-8 w-8 animate-spin" />
-          <p className="text-gray-600">Loading data...</p>
-        </div>
-      );
-    }
-
-    if (!tableData?.data.length) {
-      return (
-        <Alert>
-          <AlertDescription>
-            <strong>No data available</strong>
-            <p>Try adjusting your filters to see results.</p>
-          </AlertDescription>
-        </Alert>
-      );
-    }
-
-    return (
-      <>
-        <div className="rounded-lg border">
-          <Table>
-            <TableHeader>
-              {table.getHeaderGroups().map(headerGroup => (
-                <TableRow key={headerGroup.id}>
-                  {headerGroup.headers.map(header => (
-                    <TableHead key={header.id}>
-                      {header.isPlaceholder
-                        ? null
-                        : flexRender(
-                            header.column.columnDef.header,
-                            header.getContext()
-                          )}
-                    </TableHead>
-                  ))}
-                </TableRow>
-              ))}
-            </TableHeader>
-            <TableBody>
-              {table.getRowModel().rows?.length ? (
-                table.getRowModel().rows.map(row => (
-                  <TableRow
-                    data-state={row.getIsSelected() && "selected"}
-                    key={row.id}
-                  >
-                    {row.getVisibleCells().map(cell => (
-                      <TableCell key={cell.id}>
-                        {flexRender(
-                          cell.column.columnDef.cell,
-                          cell.getContext()
-                        )}
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow>
-                  <TableCell
-                    className="h-24 text-center"
-                    colSpan={columnConfigs.length}
-                  >
-                    No results.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </div>
-
-        {totalPages > 1 && (
-          <div className="mt-4 flex justify-center">
-            <Pagination>
-              <PaginationContent>
-                <PaginationItem>
-                  <PaginationPrevious
-                    aria-disabled={currentPage === 1}
-                    className={
-                      currentPage === 1 ? "pointer-events-none opacity-50" : ""
-                    }
-                    href="#"
-                    onClick={event_ => {
-                      event_.preventDefault();
-                      if (currentPage !== 1) {
-                        handlePageChange(currentPage - 1);
-                      }
-                    }}
-                    tabIndex={currentPage === 1 ? -1 : 0}
-                  />
-                </PaginationItem>
-                {paginationRange.map((page, index) =>
-                  typeof page === "string" ? (
-                    <PaginationItem key={`ellipsis-${index}`}>
-                      <PaginationEllipsis />
-                    </PaginationItem>
-                  ) : (
-                    <PaginationItem key={page}>
-                      <PaginationLink
-                        href="#"
-                        isActive={currentPage === page}
-                        onClick={event_ => {
-                          event_.preventDefault();
-                          handlePageChange(page);
-                        }}
-                      >
-                        {page}
-                      </PaginationLink>
-                    </PaginationItem>
-                  )
-                )}
-                <PaginationItem>
-                  <PaginationNext
-                    aria-disabled={currentPage === totalPages}
-                    className={
-                      currentPage === totalPages
-                        ? "pointer-events-none opacity-50"
-                        : ""
-                    }
-                    href="#"
-                    onClick={event_ => {
-                      event_.preventDefault();
-                      if (currentPage !== totalPages) {
-                        handlePageChange(currentPage + 1);
-                      }
-                    }}
-                  />
-                </PaginationItem>
-              </PaginationContent>
-            </Pagination>
-          </div>
-        )}
-      </>
-    );
-  };
+  const rowCount = tableData?.data?.length ?? 0; // ✅ safe check
 
   return (
     <div className="space-y-6">
       {title && <h2 className="text-lg font-semibold">{title}</h2>}
 
-      <FilterPanel
-        apiConfig={apiConfig}
-        debouncedFilters={debouncedFilters}
-        filterConfigs={filterConfigs}
-        filters={filters}
-        onClearFilters={handleClearFilters}
-        onSearchChange={handleSearchChange}
-        onSelectChange={handleSelectChange}
-      />
+      {/* ✅ Only render FilterPanel if filterConfigs provided */}
+      {filterConfigs && filterConfigs.length > 0 && (
+        <FilterPanel
+          apiConfig={apiConfig}
+          debouncedFilters={debouncedFilters}
+          filterConfigs={filterConfigs}
+          filters={filters}
+          onClearFilters={handleClearFilters}
+          onSearchChange={handleSearchChange}
+          onSelectChange={handleSelectChange}
+        />
+      )}
 
-      <div className="space-y-4">{renderTableContent()}</div>
+      <div className="space-y-4">
+        {isLoading && <TableLoadingState />}
+
+        {!isLoading && rowCount === 0 && <TableEmptyState />}
+
+        {!isLoading && rowCount > 0 && (
+          <>
+            <div className="rounded-lg border">
+              <Table>
+                <TableHeader>
+                  {table.getHeaderGroups().map(headerGroup => (
+                    <TableRow key={headerGroup.id}>
+                      {headerGroup.headers.map(header => (
+                        <TableHead key={header.id}>
+                          {header.isPlaceholder
+                            ? undefined
+                            : flexRender(
+                                header.column.columnDef.header,
+                                header.getContext()
+                              )}
+                        </TableHead>
+                      ))}
+                    </TableRow>
+                  ))}
+                </TableHeader>
+                <TableBody>
+                  {table.getRowModel().rows?.length ? (
+                    table.getRowModel().rows.map(row => (
+                      <TableRow
+                        data-state={row.getIsSelected() && "selected"}
+                        key={row.id}
+                      >
+                        {row.getVisibleCells().map(cell => (
+                          <TableCell key={cell.id}>
+                            {flexRender(
+                              cell.column.columnDef.cell,
+                              cell.getContext()
+                            )}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell
+                        className="h-24 text-center"
+                        colSpan={columnConfigs.length}
+                      >
+                        No results.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            {totalPages > 1 && (
+              <div className="mt-4 flex justify-center">
+                <Pagination>
+                  <PaginationContent>
+                    <PaginationItem>
+                      <PaginationPrevious
+                        aria-disabled={currentPage === 1}
+                        className={
+                          currentPage === 1
+                            ? "pointer-events-none opacity-50"
+                            : ""
+                        }
+                        href="#"
+                        onClick={event_ => {
+                          event_.preventDefault();
+                          if (currentPage !== 1) {
+                            handlePageChange(currentPage - 1);
+                          }
+                        }}
+                        tabIndex={currentPage === 1 ? -1 : 0}
+                      />
+                    </PaginationItem>
+                    {paginationRange.map((page, index) =>
+                      typeof page === "string" ? (
+                        <PaginationItem key={`ellipsis-${index}`}>
+                          <PaginationEllipsis />
+                        </PaginationItem>
+                      ) : (
+                        <PaginationItem key={page}>
+                          <PaginationLink
+                            href="#"
+                            isActive={currentPage === page}
+                            onClick={event_ => {
+                              event_.preventDefault();
+                              handlePageChange(page);
+                            }}
+                          >
+                            {page}
+                          </PaginationLink>
+                        </PaginationItem>
+                      )
+                    )}
+                    <PaginationItem>
+                      <PaginationNext
+                        aria-disabled={currentPage === totalPages}
+                        className={
+                          currentPage === totalPages
+                            ? "pointer-events-none opacity-50"
+                            : ""
+                        }
+                        href="#"
+                        onClick={event_ => {
+                          event_.preventDefault();
+                          if (currentPage !== totalPages) {
+                            handlePageChange(currentPage + 1);
+                          }
+                        }}
+                      />
+                    </PaginationItem>
+                  </PaginationContent>
+                </Pagination>
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
