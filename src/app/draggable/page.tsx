@@ -1,10 +1,10 @@
 import dynamic from "next/dynamic";
-const Test = dynamic(() => import("../../components/draggable"));
+const Drag = dynamic(() => import("../../components/drag"));
 
 export default function Home() {
   return (
     <>
-      <Test />
+      <Drag />
     </>
   );
 }

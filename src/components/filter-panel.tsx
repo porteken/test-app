@@ -1,13 +1,29 @@
 "use client";
 
 import { InfiniteData, useInfiniteQuery } from "@tanstack/react-query";
-import React, { useMemo } from "react";
+import { ChevronsUpDown, Loader2 } from "lucide-react";
+import * as React from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useInView } from "react-intersection-observer";
 
 import { Button } from "@/components/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
-import { InfiniteSearchableSelect } from "./infinite-select";
+/* -------------------- Types -------------------- */
 
-type ApiConfig = {
+export type ApiConfig = {
   baseUrl: string;
   defaultLimit?: number;
   endpoints: {
@@ -16,7 +32,7 @@ type ApiConfig = {
   };
 };
 
-type ApiResponse<T = any> = {
+export type ApiResponse<T = string> = {
   data: T[];
   limit: number;
   next?: string;
@@ -24,23 +40,161 @@ type ApiResponse<T = any> = {
   total: number;
 };
 
-type Entity = { id: string; name: string };
+export type Entity = {
+  id: string;
+  name: string;
+};
 
-type Filter = { search: string; selected: Entity | null };
+export type Filter = {
+  search: string;
+  selected: Entity | null;
+};
 
-type FilterConfig = {
+export type FilterConfig = {
   apiField: string;
   key: string;
   label: string;
   placeholder: string;
 };
 
-type FiltersState = Record<string, Filter>;
+export type FiltersState = Record<string, Filter>;
 
-type InfiniteQueryPage = {
-  items: Entity[];
+export type InfiniteQueryPage<TItem extends Entity = Entity> = {
+  items: TItem[];
   nextPage?: number;
 };
+
+/* -------------------- Infinite Select -------------------- */
+
+export type InfiniteSearchableSelectProperties<TData extends Entity> = {
+  data: InfiniteData<InfiniteQueryPage<TData>> | undefined;
+  fetchNextPage: () => void;
+  hasNextPage: boolean;
+  isError: boolean;
+  isFetching: boolean;
+  isFetchingNextPage: boolean;
+  itemToId: (item: TData) => string;
+  itemToName: (item: TData) => string;
+  label: string;
+  onValueChange: (value: null | TData) => void;
+  placeholder: string;
+  search: string;
+  selectedValue: null | TData;
+  setSearch: (search: string) => void;
+};
+
+export function InfiniteSearchableSelect<TData extends Entity>({
+  data,
+  fetchNextPage,
+  hasNextPage,
+  isError,
+  isFetching,
+  isFetchingNextPage,
+  itemToId,
+  itemToName,
+  label,
+  onValueChange,
+  placeholder,
+  search,
+  selectedValue,
+  setSearch,
+}: InfiniteSearchableSelectProperties<TData>) {
+  const [open, setOpen] = useState(false);
+
+  const allItems = useMemo(
+    () => data?.pages.flatMap(page => page.items) ?? [],
+    [data]
+  );
+
+  const { inView, ref: intersectionReference } = useInView({ threshold: 1 });
+
+  useEffect(() => {
+    if (inView && hasNextPage && !isFetching) {
+      fetchNextPage();
+    }
+  }, [inView, hasNextPage, isFetching, fetchNextPage]);
+
+  const handleSelect = useCallback(
+    (item: TData) => {
+      onValueChange(item);
+      setSearch(itemToName(item));
+      setOpen(false);
+    },
+    [onValueChange, setSearch, itemToName]
+  );
+
+  return (
+    <div className="flex flex-col gap-2">
+      <label className="text-sm font-medium">{label}</label>
+      <Popover onOpenChange={setOpen} open={open}>
+        <PopoverTrigger asChild>
+          <Button
+            aria-expanded={open}
+            className="w-full justify-between"
+            role="combobox"
+            variant="outline"
+          >
+            {selectedValue ? itemToName(selectedValue) : placeholder}
+            {isFetching && !isFetchingNextPage ? (
+              <Loader2 className="ml-2 h-4 w-4 animate-spin opacity-70" />
+            ) : (
+              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            )}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+          <Command shouldFilter={false}>
+            <CommandInput
+              onValueChange={value => {
+                setSearch(value);
+                if (value === "") {
+                  onValueChange(null);
+                }
+              }}
+              placeholder={placeholder}
+              value={search}
+            />
+            <CommandList className="max-h-52">
+              {isError && (
+                <CommandEmpty className="text-red-500">
+                  Error fetching data
+                </CommandEmpty>
+              )}
+
+              {!isError && allItems.length === 0 && !isFetching && (
+                <CommandEmpty>Nothing found</CommandEmpty>
+              )}
+
+              <CommandGroup>
+                {allItems.map(item => (
+                  <CommandItem
+                    key={itemToId(item)}
+                    onSelect={() => handleSelect(item)}
+                    value={itemToId(item)}
+                  >
+                    {itemToName(item)}
+                  </CommandItem>
+                ))}
+
+                {hasNextPage && (
+                  <div className="h-1" ref={intersectionReference} />
+                )}
+
+                {isFetchingNextPage && (
+                  <div className="flex justify-center py-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  </div>
+                )}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
+
+/* -------------------- Data Fetching -------------------- */
 
 const fetchFilterOptions = async (
   fieldName: string,
@@ -75,9 +229,9 @@ const fetchFilterOptions = async (
   }
 
   const data: ApiResponse = await response.json();
-  const items: Entity[] = (data.data as string[]).map(name => ({
-    id: name,
-    name,
+  const items: Entity[] = data.data.map(item => ({
+    id: String(item),
+    name: String(item),
   }));
 
   return {
@@ -135,6 +289,22 @@ const useFilterOptions = (
   });
 };
 
+/* -------------------- Configurable Select -------------------- */
+
+interface ConfigurableSelectProperties {
+  config: FilterConfig;
+  data: InfiniteData<InfiniteQueryPage> | undefined;
+  fetchNextPage: () => void;
+  hasNextPage: boolean;
+  isError: boolean;
+  isFetching: boolean;
+  isFetchingNextPage: boolean;
+  onSearchChange: (key: string, value: string) => void;
+  onSelectChange: (key: string, value: Entity | null) => void;
+  search: string;
+  selectedValue: Entity | null;
+}
+
 const ConfigurableSelect = React.memo(
   ({
     config,
@@ -148,19 +318,7 @@ const ConfigurableSelect = React.memo(
     onSelectChange,
     search,
     selectedValue,
-  }: {
-    config: FilterConfig;
-    data: InfiniteData<InfiniteQueryPage> | undefined;
-    fetchNextPage: () => void;
-    hasNextPage: boolean;
-    isError: boolean;
-    isFetching: boolean;
-    isFetchingNextPage: boolean;
-    onSearchChange: (key: string, value: string) => void;
-    onSelectChange: (key: string, value: Entity | null) => void;
-    search: string;
-    selectedValue: Entity | null;
-  }) => (
+  }: ConfigurableSelectProperties) => (
     <InfiniteSearchableSelect
       data={data}
       fetchNextPage={fetchNextPage}
@@ -168,11 +326,11 @@ const ConfigurableSelect = React.memo(
       isError={isError}
       isFetching={isFetching}
       isFetchingNextPage={isFetchingNextPage}
-      itemToId={item => item.id}
-      itemToName={item => item.name}
+      itemToId={(item: Entity) => item.id}
+      itemToName={(item: Entity) => item.name}
       label={config.label}
-      onValueChange={value =>
-        onSelectChange(config.key, value as Entity | null)
+      onValueChange={(value: Entity | null) =>
+        onSelectChange(config.key, value)
       }
       placeholder={config.placeholder}
       search={search}
@@ -184,7 +342,9 @@ const ConfigurableSelect = React.memo(
 
 ConfigurableSelect.displayName = "ConfigurableSelect";
 
-type FilterPanelProperties = {
+/* -------------------- Filter Panel -------------------- */
+
+interface FilterPanelProperties {
   apiConfig: ApiConfig;
   debouncedFilters: FiltersState;
   filterConfigs: FilterConfig[];
@@ -192,9 +352,9 @@ type FilterPanelProperties = {
   onClearFilters: () => void;
   onSearchChange: (key: string, value: string) => void;
   onSelectChange: (key: string, value: Entity | null) => void;
-};
+}
 
-export function FilterPanel({
+export const FilterPanel = ({
   apiConfig,
   debouncedFilters,
   filterConfigs,
@@ -202,26 +362,12 @@ export function FilterPanel({
   onClearFilters,
   onSearchChange,
   onSelectChange,
-}: FilterPanelProperties) {
+}: FilterPanelProperties) => {
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: "1rem",
-      }}
-    >
-      <h2 style={{ margin: 0 }}>Filters</h2>
+    <div className="flex flex-col gap-4">
+      <h2 className="m-0">Filters</h2>
 
-      <div
-        style={{
-          alignItems: "flex-end",
-          display: "flex",
-          flexDirection: "row",
-          flexWrap: "wrap",
-          gap: "1rem",
-        }}
-      >
+      <div className="flex flex-row flex-wrap items-end gap-4">
         {filterConfigs.map(config => {
           const filterQuery = useFilterOptions(
             config.key,
@@ -247,8 +393,10 @@ export function FilterPanel({
             />
           );
         })}
-        <Button onClick={onClearFilters}>Clear All</Button>
+        <Button onClick={onClearFilters} variant="outline">
+          Clear All
+        </Button>
       </div>
     </div>
   );
-}
+};

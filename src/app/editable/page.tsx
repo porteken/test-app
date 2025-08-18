@@ -1,10 +1,10 @@
 import dynamic from "next/dynamic";
-const Test = dynamic(() => import("../../components/editable"));
+const Edit = dynamic(() => import("../../components/edit"));
 
 export default function Home() {
   return (
     <>
-      <Test />
+      <Edit />
     </>
   );
 }

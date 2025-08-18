@@ -30,6 +30,7 @@ import { toast } from "sonner";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -55,429 +56,115 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-interface DraggableRecord {
-  customer: string;
-  filtered: FilteredStatus;
-  id: number | string;
-  position: number;
-  product: string;
+// -------------------- Types --------------------
+export interface ColumnConfig<T> {
+  key: keyof T;
+  label: string;
+  options?: { label: string; value: string }[];
+  placeholder?: string;
+  render?: (value: T[keyof T], row: T) => React.ReactNode;
+  type?: "checkbox" | "date" | "select" | "text";
+  validate?: (value: T[keyof T], row: T) => null | string;
 }
 
-type FilteredStatus = "false" | "true";
-
-interface SortableRowProperties {
-  cancelEditing: () => void;
-  editedRow: DraggableRecord | null;
-  isEditing: boolean;
-  openDeleteConfirmModal: (id: number | string) => void;
-  row: DraggableRecord;
-  saveRow: () => Promise<void>;
-  saving: boolean;
-  startEditing: (row: DraggableRecord) => void;
-  updateEditedRow: (updates: Partial<DraggableRecord>) => void;
-  validationErrors: ValidationErrors;
+interface DraggableEditableTableProperties<T extends { id: number | string }> {
+  apiBaseUrl: string;
+  columns: ColumnConfig<T>[];
+  createNewRow: (position: number) => T;
 }
 
-interface ValidationErrors {
-  customer?: string;
-  product?: string;
-}
-
-const API_BASE_URL = "http://localhost:8000/api/draggable";
-const FILTERED_OPTIONS = [
-  { label: "True", value: "true" },
-  { label: "False", value: "false" },
-] as const;
-
+// -------------------- Helpers --------------------
 const isPersistentId = (id: number | string | undefined): boolean =>
   typeof id === "number" || (typeof id === "string" && /^\d+$/.test(id));
 
-const validateRecord = (record: DraggableRecord): ValidationErrors => {
-  const errors: ValidationErrors = {};
-
-  if (!record.customer?.trim()) {
-    errors.customer = "Customer name is required";
-  }
-
-  if (!record.product?.trim()) {
-    errors.product = "Product name is required";
-  }
-
-  return errors;
-};
-
-const createNewRecord = (position: number): DraggableRecord => ({
-  customer: "",
-  filtered: "false",
-  id: `new-${Date.now()}-${Math.random()}`,
-  position,
-  product: "",
-});
-
-const api = {
-  async deleteRecord(id: number | string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/${id}`, {
-      method: "DELETE",
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to delete: ${response.statusText}`);
-    }
-  },
-
-  async fetchRecords(): Promise<DraggableRecord[]> {
-    const response = await fetch(API_BASE_URL);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch data: ${response.statusText}`);
-    }
-    return response.json();
-  },
-
-  async saveRecord(record: DraggableRecord): Promise<DraggableRecord> {
-    const isNew = !isPersistentId(record.id);
-    const url = isNew ? API_BASE_URL : `${API_BASE_URL}/${record.id}`;
-    const method = isNew ? "POST" : "PUT";
-
-    const payload = {
-      customer: record.customer,
-      filtered: record.filtered,
-      product: record.product,
-    };
-
-    const response = await fetch(url, {
-      body: JSON.stringify(payload),
-      headers: { "Content-Type": "application/json" },
-      method,
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to save: ${response.statusText}`);
-    }
-
-    return response.json();
-  },
-
-  async updatePositions(records: DraggableRecord[]): Promise<void> {
-    const updates = records.map((row, index) =>
-      fetch(`${API_BASE_URL}/${row.id}`, {
-        body: JSON.stringify({
-          customer: row.customer,
-          filtered: row.filtered,
-          position: index,
-          product: row.product,
-        }),
-        headers: { "Content-Type": "application/json" },
-        method: "PUT",
-      })
-    );
-
-    await Promise.all(updates);
-  },
-};
-
-const SortableRow = React.memo<SortableRowProperties>(
-  ({
-    cancelEditing,
-    editedRow,
-    isEditing,
-    openDeleteConfirmModal,
-    row,
-    saveRow,
-    saving,
-    startEditing,
-    updateEditedRow,
-    validationErrors,
-  }) => {
-    const {
-      attributes,
-      isDragging,
-      listeners,
-      setNodeRef,
-      transform,
-      transition,
-    } = useSortable({
-      disabled: isEditing,
-      id: row.id,
-    });
-
-    const style = {
-      opacity: isDragging ? 0.8 : 1,
-      transform: CSS.Transform.toString(transform),
-      transition,
-      zIndex: isDragging ? 1 : 0,
-    };
-
-    const isExistingRecord = isPersistentId(row.id);
-
-    const handleCustomerChange = useCallback(
-      (event: React.ChangeEvent<HTMLInputElement>) => {
-        updateEditedRow({ customer: event.target.value });
-      },
-      [updateEditedRow]
-    );
-
-    const handleProductChange = useCallback(
-      (event: React.ChangeEvent<HTMLInputElement>) => {
-        updateEditedRow({ product: event.target.value });
-      },
-      [updateEditedRow]
-    );
-
-    const handleFilteredChange = useCallback(
-      (value: string) => {
-        updateEditedRow({ filtered: (value as FilteredStatus) || "false" });
-      },
-      [updateEditedRow]
-    );
-
-    const handleEdit = useCallback(() => {
-      startEditing(row);
-    }, [startEditing, row]);
-
-    const handleDelete = useCallback(() => {
-      openDeleteConfirmModal(row.id);
-    }, [openDeleteConfirmModal, row.id]);
-
-    return (
-      <TableRow ref={setNodeRef} style={style} {...attributes}>
-        <TableCell className="w-10">
-          <div
-            {...listeners}
-            aria-label="Drag to reorder"
-            className={`
-              flex items-center justify-center
-              ${
-                isEditing
-                  ? "cursor-not-allowed opacity-50"
-                  : `
-                    cursor-grab
-                    hover:text-gray-600
-                  `
-              }
-            `}
-          >
-            <GripVertical className="h-4 w-4" />
-          </div>
-        </TableCell>
-
-        <TableCell className="w-32">
-          {isEditing ? (
-            <div className="flex gap-2">
-              <Button
-                aria-label="Cancel editing"
-                className="h-8 w-8 p-0"
-                disabled={saving}
-                onClick={cancelEditing}
-                size="sm"
-                variant="ghost"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-              <Button
-                aria-label="Save changes"
-                className="h-8 w-8 p-0"
-                disabled={saving}
-                onClick={saveRow}
-                size="sm"
-                variant="default"
-              >
-                {saving ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Save className="h-4 w-4" />
-                )}
-              </Button>
-            </div>
-          ) : (
-            <div className="flex gap-2">
-              <Button
-                aria-label="Edit row"
-                className="h-8 w-8 p-0"
-                onClick={handleEdit}
-                size="sm"
-                variant="ghost"
-              >
-                <Edit className="h-4 w-4" />
-              </Button>
-              {isExistingRecord && (
-                <Button
-                  aria-label="Delete row"
-                  className={`
-                    h-8 w-8 p-0 text-red-600
-                    hover:bg-red-50 hover:text-red-700
-                  `}
-                  onClick={handleDelete}
-                  size="sm"
-                  variant="ghost"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-          )}
-        </TableCell>
-
-        <TableCell>
-          {isEditing ? (
-            <div className="space-y-1">
-              <Input
-                aria-label="Customer name"
-                className={validationErrors.customer ? "border-red-500" : ""}
-                disabled={saving}
-                onChange={handleCustomerChange}
-                placeholder="Enter customer name"
-                value={editedRow?.customer || ""}
-              />
-              {validationErrors.customer && (
-                <p className="text-sm text-red-500">
-                  {validationErrors.customer}
-                </p>
-              )}
-            </div>
-          ) : (
-            <span className={row.customer ? "" : "text-gray-400"}>
-              {row.customer || "No customer"}
-            </span>
-          )}
-        </TableCell>
-
-        <TableCell>
-          {isEditing ? (
-            <div className="space-y-1">
-              <Input
-                aria-label="Product name"
-                className={validationErrors.product ? "border-red-500" : ""}
-                disabled={saving}
-                onChange={handleProductChange}
-                placeholder="Enter product name"
-                value={editedRow?.product || ""}
-              />
-              {validationErrors.product && (
-                <p className="text-sm text-red-500">
-                  {validationErrors.product}
-                </p>
-              )}
-            </div>
-          ) : (
-            <span className={row.product ? "" : "text-gray-400"}>
-              {row.product || "No product"}
-            </span>
-          )}
-        </TableCell>
-
-        <TableCell className="w-32">
-          {isEditing ? (
-            <Select
-              disabled={saving}
-              onValueChange={handleFilteredChange}
-              value={editedRow?.filtered || "false"}
-            >
-              <SelectTrigger aria-label="Filtered status">
-                <SelectValue placeholder="Select status" />
-              </SelectTrigger>
-              <SelectContent>
-                {FILTERED_OPTIONS.map(option => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <span className="capitalize">{row.filtered}</span>
-          )}
-        </TableCell>
-      </TableRow>
-    );
-  }
-);
-
-SortableRow.displayName = "SortableRow";
-
-export default function DraggableEditableTable() {
-  const [data, setData] = useState<DraggableRecord[]>([]);
+// -------------------- Main Component --------------------
+export function DraggableEditableTable<T extends { id: number | string }>({
+  apiBaseUrl,
+  columns,
+  createNewRow,
+}: DraggableEditableTableProperties<T>) {
+  const [data, setData] = useState<T[]>([]);
   const [editingRowId, setEditingRowId] = useState<null | number | string>(
     null
   );
-  const [editedRow, setEditedRow] = useState<DraggableRecord | null>(null);
+  const [editedRow, setEditedRow] = useState<null | T>(null);
   const [rowToDelete, setRowToDelete] = useState<null | number | string>(null);
-  const [validationErrors, setValidationErrors] = useState<ValidationErrors>(
-    {}
-  );
+  const [validationErrors, setValidationErrors] = useState<
+    Record<string, string>
+  >({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<null | string>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
   const sortableIds = useMemo(() => data.map(item => item.id), [data]);
-
   const hasUnsavedChanges = editingRowId !== null;
 
+  // Fetch
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const result = await api.fetchRecords();
+      const result = await request<T[]>(apiBaseUrl);
       setData(result);
-    } catch (error) {
+    } catch (error_) {
       const errorMessage =
-        error instanceof Error ? error.message : "Failed to fetch data";
+        error_ instanceof Error ? error_.message : "Failed to fetch data";
       setError(errorMessage);
-      toast.error("Error", {
-        description: errorMessage,
-        icon: <AlertCircle className="h-4 w-4" />,
-      });
+      toast.error("Error fetching data", { description: errorMessage });
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [apiBaseUrl]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
+  // Drag sensors
   const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 10 },
-    })
+    useSensor(PointerSensor, { activationConstraint: { distance: 10 } })
   );
 
+  // Handle drag end
   const handleDragEnd = useCallback(
     async (event: DragEndEvent) => {
       const { active, over } = event;
-
       if (!over || active.id === over.id) {
         return;
       }
 
       const oldIndex = data.findIndex(item => item.id === active.id);
       const newIndex = data.findIndex(item => item.id === over.id);
-
       if (oldIndex === -1 || newIndex === -1) {
         return;
       }
 
-      const reorderedData = arrayMove(data, oldIndex, newIndex);
-
-      setData(reorderedData);
+      const reordered = arrayMove(data, oldIndex, newIndex);
+      setData(reordered);
 
       try {
-        await api.updatePositions(reorderedData);
-        toast.success("Success", {
-          description: "Row order updated successfully",
-        });
-      } catch {
-        setData(data);
-        toast.error("Error", {
-          description: "Failed to update order",
-          icon: <AlertCircle className="h-4 w-4" />,
-        });
+        await Promise.all(
+          reordered.map((row, index) =>
+            request(`${apiBaseUrl}/${row.id}`, {
+              body: JSON.stringify({ ...row, position: index }),
+              method: "PUT",
+            })
+          )
+        );
+        toast.success("Row order updated");
+      } catch (error_) {
+        const errorMessage =
+          error_ instanceof Error ? error_.message : "Failed to update order";
+        toast.error("Error updating order", { description: errorMessage });
+        fetchData();
       }
     },
-    [data]
+    [data, apiBaseUrl, fetchData]
   );
 
-  const startEditing = useCallback((row: DraggableRecord) => {
+  // Editing
+  const startEditing = useCallback((row: T) => {
     setEditingRowId(row.id);
     setEditedRow({ ...row });
     setValidationErrors({});
@@ -485,9 +172,7 @@ export default function DraggableEditableTable() {
 
   const cancelEditing = useCallback(() => {
     if (editedRow && !isPersistentId(editedRow.id)) {
-      setData(currentData =>
-        currentData.filter(row => row.id !== editedRow.id)
-      );
+      setData(current => current.filter(r => r.id !== editedRow.id));
     }
     setEditingRowId(null);
     setEditedRow(null);
@@ -499,48 +184,52 @@ export default function DraggableEditableTable() {
       return;
     }
 
-    const errors = validateRecord(editedRow);
+    // Run validations
+    const errors: Record<string, string> = {};
+    for (const col of columns) {
+      if (col.validate) {
+        const error = col.validate(editedRow[col.key], editedRow);
+        if (error) {
+          errors[col.key as string] = error;
+        }
+      }
+    }
     if (Object.keys(errors).length > 0) {
       setValidationErrors(errors);
       return;
     }
 
     const isNew = !isPersistentId(editedRow.id);
+    const url = isNew ? apiBaseUrl : `${apiBaseUrl}/${editedRow.id}`;
+    const method = isNew ? "POST" : "PUT";
 
     try {
       setSaving(true);
-      const savedRecord = await api.saveRecord(editedRow);
-      const updatedRecord = { ...editedRow, ...savedRecord };
-
-      setData(currentData =>
-        isNew
-          ? currentData.map(row =>
-              row.id === editingRowId ? updatedRecord : row
-            )
-          : currentData.map(row =>
-              row.id === updatedRecord.id ? updatedRecord : row
-            )
-      );
-
-      toast.success("Success", {
-        description: `Record ${isNew ? "created" : "updated"} successfully`,
+      const saved = await request<T>(url, {
+        body: JSON.stringify(editedRow),
+        method,
       });
 
+      setData(current =>
+        isNew
+          ? [saved, ...current.filter(r => r.id !== editedRow.id)]
+          : current.map(r => (r.id === editedRow.id ? saved : r))
+      );
+
+      toast.success(`Record ${isNew ? "created" : "updated"}`);
       setEditingRowId(null);
       setEditedRow(null);
       setValidationErrors({});
-    } catch (error) {
+    } catch (error_) {
       const errorMessage =
-        error instanceof Error ? error.message : "Failed to save record";
-      toast.error("Error", {
-        description: errorMessage,
-        icon: <AlertCircle className="h-4 w-4" />,
-      });
+        error_ instanceof Error ? error_.message : "Failed to save record";
+      toast.error("Error saving record", { description: errorMessage });
     } finally {
       setSaving(false);
     }
-  }, [editedRow, editingRowId]);
+  }, [editedRow, apiBaseUrl, columns]);
 
+  // Delete
   const openDeleteConfirmModal = useCallback((id: number | string) => {
     setRowToDelete(id);
     setDeleteModalOpen(true);
@@ -550,63 +239,60 @@ export default function DraggableEditableTable() {
     if (rowToDelete === null) {
       return;
     }
-
     try {
-      await api.deleteRecord(rowToDelete);
-      setData(currentData => currentData.filter(row => row.id !== rowToDelete));
-      toast.success("Success", {
-        description: "Record deleted successfully",
-      });
-    } catch (error) {
+      await request(`${apiBaseUrl}/${rowToDelete}`, { method: "DELETE" });
+      setData(current => current.filter(r => r.id !== rowToDelete));
+      toast.success("Record deleted");
+    } catch (error_) {
       const errorMessage =
-        error instanceof Error ? error.message : "Failed to delete record";
-      toast.error("Error", {
-        description: errorMessage,
-        icon: <AlertCircle className="h-4 w-4" />,
-      });
+        error_ instanceof Error ? error_.message : "Failed to delete record";
+      toast.error("Error deleting record", { description: errorMessage });
     } finally {
       setDeleteModalOpen(false);
       setRowToDelete(null);
     }
-  }, [rowToDelete]);
+  }, [rowToDelete, apiBaseUrl]);
 
+  // Add
   const addRow = useCallback(() => {
-    const newRow = createNewRecord(data.length);
+    const newRow = createNewRow(data.length);
     setData(previous => [newRow, ...previous]);
     startEditing(newRow);
-  }, [startEditing, data.length]);
+  }, [createNewRow, data.length, startEditing]);
 
-  const updateEditedRow = useCallback((updates: Partial<DraggableRecord>) => {
-    setEditedRow(previous => (previous ? { ...previous, ...updates } : null));
+  // Update edited row
+  const updateEditedRow = useCallback(
+    <K extends keyof T>(key: K, value: T[K]) => {
+      setEditedRow(previous =>
+        previous ? { ...previous, [key]: value } : null
+      );
+      setValidationErrors(previous => {
+        const newErrors = { ...previous };
+        delete newErrors[key as string];
+        return newErrors;
+      });
+    },
+    []
+  );
 
-    setValidationErrors(previous => {
-      const newErrors = { ...previous };
-      for (const key of Object.keys(updates)) {
-        delete newErrors[key as keyof ValidationErrors];
-      }
-      return newErrors;
-    });
-  }, []);
-
+  // -------------------- Render --------------------
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center space-y-4 p-8">
+      <div className="flex flex-col items-center justify-center p-8">
         <Loader2 className="h-8 w-8 animate-spin" />
-        <p className="text-gray-600">Loading data...</p>
+        <p>Loading...</p>
       </div>
     );
   }
 
   if (error && data.length === 0) {
     return (
-      <Alert className="max-w-2xl">
+      <Alert className="max-w-2xl" variant="destructive">
         <AlertCircle className="h-4 w-4" />
-        <AlertDescription className="space-y-4">
-          <div>
-            <strong>Error loading data</strong>
-            <p>{error}</p>
-          </div>
-          <Button onClick={fetchData} variant="outline">
+        <AlertDescription>
+          <p className="font-medium">Error loading data</p>
+          <p>{error}</p>
+          <Button onClick={fetchData} size="sm" variant="outline">
             Retry
           </Button>
         </AlertDescription>
@@ -616,82 +302,70 @@ export default function DraggableEditableTable() {
 
   return (
     <div className="space-y-6">
+      {/* Add Row */}
       <div className="flex items-center justify-between">
-        <Button className="gap-2" disabled={hasUnsavedChanges} onClick={addRow}>
-          <Plus className="h-4 w-4" />
+        <Button disabled={hasUnsavedChanges} onClick={addRow}>
+          <Plus className="mr-2 h-4 w-4" />
           Add Row
         </Button>
         {hasUnsavedChanges && (
           <p className="text-sm text-orange-600">
-            Finish editing the current row before adding a new one
+            Finish editing before adding a new row
           </p>
         )}
       </div>
 
-      {data.length === 0 ? (
-        <Alert>
-          <AlertDescription>
-            <div>
-              <strong>No data available</strong>
-              <p>
-                No records found. Click &quot;Add Row&quot; to create your first
-                record.
-              </p>
-            </div>
-          </AlertDescription>
-        </Alert>
-      ) : (
-        <div className="rounded-lg border">
-          <DndContext
-            collisionDetection={closestCenter}
-            onDragEnd={handleDragEnd}
-            sensors={sensors}
-          >
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead aria-label="Drag handle" className="w-10" />
-                  <TableHead className="w-32">Actions</TableHead>
-                  <TableHead>Customer</TableHead>
-                  <TableHead>Product</TableHead>
-                  <TableHead className="w-32">Filtered</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <SortableContext
-                  items={sortableIds}
-                  strategy={verticalListSortingStrategy}
-                >
-                  {data.map(row => (
-                    <SortableRow
-                      cancelEditing={cancelEditing}
-                      editedRow={editedRow}
-                      isEditing={editingRowId === row.id}
-                      key={row.id}
-                      openDeleteConfirmModal={openDeleteConfirmModal}
-                      row={row}
-                      saveRow={saveRow}
-                      saving={saving}
-                      startEditing={startEditing}
-                      updateEditedRow={updateEditedRow}
-                      validationErrors={validationErrors}
-                    />
-                  ))}
-                </SortableContext>
-              </TableBody>
-            </Table>
-          </DndContext>
-        </div>
-      )}
+      {/* Table */}
+      <div className="rounded-lg border">
+        <DndContext
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+          sensors={sensors}
+        >
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-10" />
+                <TableHead className="w-32">Actions</TableHead>
+                {columns.map(col => (
+                  <TableHead key={String(col.key)}>{col.label}</TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <SortableContext
+                items={sortableIds}
+                strategy={verticalListSortingStrategy}
+              >
+                {data.map(row => (
+                  <SortableRow
+                    cancelEditing={cancelEditing}
+                    columns={columns}
+                    editedRow={editedRow}
+                    isEditing={editingRowId === row.id}
+                    key={row.id}
+                    openDeleteConfirmModal={openDeleteConfirmModal}
+                    row={row}
+                    saveRow={saveRow}
+                    saving={saving}
+                    startEditing={startEditing}
+                    updateEditedRow={updateEditedRow}
+                    validationErrors={validationErrors}
+                  />
+                ))}
+              </SortableContext>
+            </TableBody>
+          </Table>
+        </DndContext>
+      </div>
 
-      {/* Delete Confirmation Dialog */}
+      {/* Delete Confirmation */}
       <Dialog onOpenChange={setDeleteModalOpen} open={deleteModalOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Confirm Delete</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete this record? This action cannot be
-              undone.
+              Are you sure you want to delete this record?
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -705,5 +379,236 @@ export default function DraggableEditableTable() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// -------------------- Cell Renderer --------------------
+function renderCell<T extends { id: number | string }>(
+  col: ColumnConfig<T>,
+  value: T[keyof T] | undefined,
+  row: T,
+  isEditing: boolean,
+  saving: boolean,
+  errorMessage: string | undefined,
+  updateEditedRow: <K extends keyof T>(key: K, value: T[K]) => void
+) {
+  const isCheckbox = col.type === "checkbox" || typeof value === "boolean";
+
+  if (isEditing) {
+    if (isCheckbox) {
+      return (
+        <Checkbox
+          checked={!!value}
+          disabled={saving}
+          onCheckedChange={checked =>
+            updateEditedRow(col.key, !!checked as T[keyof T])
+          }
+        />
+      );
+    }
+
+    if (col.type === "select" && col.options) {
+      return (
+        <Select
+          disabled={saving}
+          onValueChange={value_ =>
+            updateEditedRow(col.key, value_ as T[keyof T])
+          }
+          value={String(value ?? "")}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder={col.placeholder} />
+          </SelectTrigger>
+          <SelectContent>
+            {col.options.map(opt => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      );
+    }
+
+    return (
+      <div className="space-y-1">
+        <Input
+          className={errorMessage ? "border-red-500" : ""}
+          disabled={saving}
+          onChange={event_ =>
+            updateEditedRow(col.key, event_.target.value as T[keyof T])
+          }
+          placeholder={col.placeholder}
+          type={col.type === "date" ? "date" : "text"}
+          value={String(value ?? "")}
+        />
+        {errorMessage && <p className="text-sm text-red-500">{errorMessage}</p>}
+      </div>
+    );
+  }
+
+  // View mode
+  if (col.render) {
+    return col.render(value as T[keyof T], row);
+  }
+  if (isCheckbox) {
+    return <Checkbox checked={!!value} disabled />;
+  }
+  return (
+    <span className={value ? "" : "text-gray-400"}>{String(value ?? "—")}</span>
+  );
+}
+
+async function request<T>(url: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(url, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(errorText || response.statusText);
+  }
+  return response.json();
+}
+
+// -------------------- Sortable Row --------------------
+function SortableRow<T extends { id: number | string }>(properties: {
+  cancelEditing: () => void;
+  columns: ColumnConfig<T>[];
+  editedRow: null | T;
+  isEditing: boolean;
+  openDeleteConfirmModal: (id: number | string) => void;
+  row: T;
+  saveRow: () => Promise<void>;
+  saving: boolean;
+  startEditing: (row: T) => void;
+  updateEditedRow: <K extends keyof T>(key: K, value: T[K]) => void;
+  validationErrors: Record<string, string>;
+}) {
+  const {
+    cancelEditing,
+    columns,
+    editedRow,
+    isEditing,
+    openDeleteConfirmModal,
+    row,
+    saveRow,
+    saving,
+    startEditing,
+    updateEditedRow,
+    validationErrors,
+  } = properties;
+
+  const {
+    attributes,
+    isDragging,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({ disabled: isEditing, id: row.id });
+
+  const style = {
+    opacity: isDragging ? 0.8 : 1,
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 1 : 0,
+  };
+
+  const isExistingRecord = isPersistentId(row.id);
+
+  return (
+    <TableRow
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      className={isEditing ? "bg-yellow-50" : ""}
+    >
+      {/* Drag Handle */}
+      <TableCell className="w-10">
+        <div
+          {...listeners}
+          className={`
+            flex items-center justify-center
+            ${isEditing ? "cursor-not-allowed opacity-50" : "cursor-grab"}
+          `}
+        >
+          <GripVertical className="h-4 w-4" />
+        </div>
+      </TableCell>
+
+      {/* Actions */}
+      <TableCell className="w-32">
+        {isEditing ? (
+          <div className="flex gap-2">
+            <Button
+              className="h-8 w-8 p-0"
+              disabled={saving}
+              onClick={cancelEditing}
+              size="sm"
+              variant="ghost"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+            <Button
+              className="h-8 w-8 p-0"
+              disabled={saving || Object.keys(validationErrors).length > 0}
+              onClick={saveRow}
+              size="sm"
+              variant="default"
+            >
+              {saving ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <Button
+              className="h-8 w-8 p-0"
+              onClick={() => startEditing(row)}
+              size="sm"
+              variant="ghost"
+            >
+              <Edit className="h-4 w-4" />
+            </Button>
+            {isExistingRecord && (
+              <Button
+                className={`
+                  h-8 w-8 p-0 text-red-600
+                  hover:bg-red-50
+                `}
+                onClick={() => openDeleteConfirmModal(row.id)}
+                size="sm"
+                variant="ghost"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+        )}
+      </TableCell>
+
+      {/* Dynamic Columns */}
+      {columns.map(col => {
+        const value = (isEditing ? editedRow : row)?.[col.key];
+        const errorMessage = validationErrors[col.key as string];
+        return (
+          <TableCell key={String(col.key)}>
+            {renderCell(
+              col,
+              value,
+              row,
+              isEditing,
+              saving,
+              errorMessage,
+              updateEditedRow
+            )}
+          </TableCell>
+        );
+      })}
+    </TableRow>
   );
 }

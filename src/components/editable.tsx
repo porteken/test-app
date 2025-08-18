@@ -33,76 +33,59 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-interface EditableRecord {
-  bought: boolean;
-  customer: string;
-  date: string; // Stored as 'YYYY-MM-DD'
-  id: number | string;
+// -------------------- Types --------------------
+export interface ColumnConfig<T> {
+  key: keyof T;
+  label: string;
+  placeholder?: string;
+  render?: (value: T[keyof T], row: T) => React.ReactNode;
+  type?: "checkbox" | "date" | "text";
+  validate?: (value: T[keyof T], row: T) => null | string;
 }
 
-interface ValidationErrors {
-  customer?: string;
-  date?: string;
+interface EditableTableProperties<T extends { id: number | string }> {
+  apiBaseUrl: string;
+  columns: ColumnConfig<T>[];
 }
 
-const API_BASE_URL = "http://localhost:8000/api/editable";
-
+// -------------------- Helpers --------------------
 const isPersistentId = (id: number | string | undefined): boolean =>
   typeof id === "number" || (typeof id === "string" && /^\d+$/.test(id));
 
-const convertDateToString = (date: Date | null): string => {
+const formatDateForInput = (date: Date | null): string => {
   if (!date || Number.isNaN(date.getTime())) {
     return "";
   }
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return date.toISOString().split("T")[0];
 };
 
-const parseStringToDate = (dateString: null | string | undefined): string => {
-  if (!dateString) {
-    return "";
-  }
-  return dateString;
-};
-
-const validateRecord = (record: EditableRecord): ValidationErrors => {
-  const errors: ValidationErrors = {};
-
-  if (!record.customer.trim()) {
-    errors.customer = "Customer name is required";
-  }
-
-  if (!record.date) {
-    errors.date = "Date is required";
-  }
-
-  return errors;
-};
-
-export default function EditableTable() {
-  const [data, setData] = useState<EditableRecord[]>([]);
+// -------------------- Generic Editable Table --------------------
+export function EditableTable<T extends { id: number | string }>({
+  apiBaseUrl,
+  columns,
+}: EditableTableProperties<T>) {
+  const [data, setData] = useState<T[]>([]);
   const [editingRowId, setEditingRowId] = useState<null | number | string>(
     null
   );
-  const [editedRow, setEditedRow] = useState<EditableRecord | null>(null);
+  const [editedRow, setEditedRow] = useState<null | T>(null);
   const [rowToDelete, setRowToDelete] = useState<null | number | string>(null);
-  const [validationErrors, setValidationErrors] = useState<ValidationErrors>(
-    {}
-  );
+  const [validationErrors, setValidationErrors] = useState<
+    Record<string, string>
+  >({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<null | string>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
+  // -------------------- Fetch --------------------
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch(API_BASE_URL);
+      const response = await fetch(apiBaseUrl);
       if (!response.ok) {
-        throw new Error(`Failed to fetch data: ${response.statusText}`);
+        throw new Error(`Failed to fetch: ${response.statusText}`);
       }
       const result = await response.json();
       setData(result);
@@ -110,20 +93,21 @@ export default function EditableTable() {
       const errorMessage =
         error_ instanceof Error ? error_.message : "Failed to fetch data";
       setError(errorMessage);
-      toast.error("Error", {
+      toast.error("Error loading data", {
         description: errorMessage,
         icon: <AlertCircle className="h-4 w-4" />,
       });
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [apiBaseUrl]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  const startEditing = useCallback((row: EditableRecord) => {
+  // -------------------- Editing --------------------
+  const startEditing = useCallback((row: T) => {
     setEditingRowId(row.id);
     setEditedRow({ ...row });
     setValidationErrors({});
@@ -131,9 +115,7 @@ export default function EditableTable() {
 
   const cancelEditing = useCallback(() => {
     if (editedRow && !isPersistentId(editedRow.id)) {
-      setData(currentData =>
-        currentData.filter(row => row.id !== editedRow.id)
-      );
+      setData(current => current.filter(row => row.id !== editedRow.id));
     }
     setEditingRowId(null);
     setEditedRow(null);
@@ -145,14 +127,23 @@ export default function EditableTable() {
       return;
     }
 
-    const errors = validateRecord(editedRow);
+    // Run validations
+    const errors: Record<string, string> = {};
+    for (const col of columns) {
+      if (col.validate) {
+        const error = col.validate(editedRow[col.key], editedRow);
+        if (error) {
+          errors[col.key as string] = error;
+        }
+      }
+    }
     if (Object.keys(errors).length > 0) {
       setValidationErrors(errors);
       return;
     }
 
     const isNew = !isPersistentId(editedRow.id);
-    const url = isNew ? API_BASE_URL : `${API_BASE_URL}/${editedRow.id}`;
+    const url = isNew ? apiBaseUrl : `${apiBaseUrl}/${editedRow.id}`;
     const method = isNew ? "POST" : "PUT";
 
     try {
@@ -162,35 +153,34 @@ export default function EditableTable() {
         headers: { "Content-Type": "application/json" },
         method,
       });
-
       if (!response.ok) {
         throw new Error(`Failed to save: ${response.statusText}`);
       }
-
       const savedRecord = await response.json();
-      setData(currentData =>
-        currentData.map(row => (row.id === editingRowId ? savedRecord : row))
+
+      setData(current =>
+        isNew
+          ? [savedRecord, ...current.filter(r => r.id !== editedRow.id)]
+          : current.map(r => (r.id === editingRowId ? savedRecord : r))
       );
 
-      toast.success("Success", {
-        description: `Record ${isNew ? "created" : "updated"} successfully`,
-      });
-
+      toast.success(`Record ${isNew ? "created" : "updated"} successfully`);
       setEditingRowId(null);
       setEditedRow(null);
       setValidationErrors({});
     } catch (error_) {
       const errorMessage =
         error_ instanceof Error ? error_.message : "Failed to save record";
-      toast.error("Error", {
+      toast.error("Error saving record", {
         description: errorMessage,
         icon: <AlertCircle className="h-4 w-4" />,
       });
     } finally {
       setSaving(false);
     }
-  }, [editedRow, editingRowId]);
+  }, [editedRow, editingRowId, apiBaseUrl, columns]);
 
+  // -------------------- Delete --------------------
   const openDeleteConfirmModal = useCallback((id: number | string) => {
     setRowToDelete(id);
     setDeleteModalOpen(true);
@@ -200,24 +190,31 @@ export default function EditableTable() {
     if (rowToDelete === null) {
       return;
     }
-
     try {
-      const response = await fetch(`${API_BASE_URL}/${rowToDelete}`, {
+      const response = await fetch(`${apiBaseUrl}/${rowToDelete}`, {
         method: "DELETE",
       });
-
       if (!response.ok) {
         throw new Error(`Failed to delete: ${response.statusText}`);
       }
+      const deletedRow = data.find(r => r.id === rowToDelete);
+      setData(current => current.filter(row => row.id !== rowToDelete));
 
-      setData(currentData => currentData.filter(row => row.id !== rowToDelete));
-      toast.success("Success", {
-        description: "Record deleted successfully",
+      toast("Record deleted", {
+        action: {
+          label: "Undo",
+          onClick: () => {
+            if (deletedRow) {
+              setData(current => [deletedRow, ...current]);
+            }
+          },
+        },
+        description: "You can undo this action",
       });
     } catch (error_) {
       const errorMessage =
         error_ instanceof Error ? error_.message : "Failed to delete record";
-      toast.error("Error", {
+      toast.error("Error deleting record", {
         description: errorMessage,
         icon: <AlertCircle className="h-4 w-4" />,
       });
@@ -225,60 +222,71 @@ export default function EditableTable() {
       setDeleteModalOpen(false);
       setRowToDelete(null);
     }
-  }, [rowToDelete]);
+  }, [rowToDelete, data, apiBaseUrl]);
 
+  // -------------------- Add --------------------
   const addRow = useCallback(() => {
-    const newRow: EditableRecord = {
-      bought: false,
-      customer: "",
-      date: convertDateToString(new Date()),
-      id: `new-${Date.now()}`,
-    };
-    setData(previous => [newRow, ...previous]);
-    setEditingRowId(newRow.id);
-    setEditedRow(newRow);
-    setValidationErrors({});
-  }, []);
-
-  const updateEditedRow = useCallback((updates: Partial<EditableRecord>) => {
-    setEditedRow(previous => (previous ? { ...previous, ...updates } : null));
-    setValidationErrors(previous => {
-      const newErrors = { ...previous };
-      for (const key of Object.keys(updates)) {
-        delete newErrors[key as keyof ValidationErrors];
+    const newRow: any = { id: `new-${Date.now()}` };
+    for (const col of columns) {
+      if (col.type === "checkbox") {
+        newRow[col.key] = false;
+      } else if (col.type === "date") {
+        newRow[col.key] = formatDateForInput(new Date());
+      } else {
+        newRow[col.key] = "";
       }
-      return newErrors;
-    });
-  }, []);
+    }
+    setData(previous => [newRow, ...previous]);
+    startEditing(newRow);
+  }, [columns, startEditing]);
 
+  // -------------------- Update Edited Row (type-safe) --------------------
+  const updateEditedRow = useCallback(
+    <K extends keyof T>(key: K, value: T[K]) => {
+      setEditedRow(previous =>
+        previous ? { ...previous, [key]: value } : null
+      );
+      setValidationErrors(previous => {
+        const newErrors = { ...previous };
+        delete newErrors[key as string];
+        return newErrors;
+      });
+    },
+    []
+  );
+
+  // -------------------- Render --------------------
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center space-y-4 p-8">
-        <Loader2 className="h-8 w-8 animate-spin" />
-        <p className="text-gray-600">Loading data...</p>
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <p className="text-muted-foreground">Loading data...</p>
       </div>
     );
   }
 
   if (error && data.length === 0) {
     return (
-      <Alert className="max-w-2xl">
-        <AlertCircle className="h-4 w-4" />
-        <AlertDescription className="space-y-4">
-          <div>
-            <strong>Error loading data</strong>
-            <p>{error}</p>
-          </div>
-          <Button onClick={fetchData} variant="outline">
-            Retry
-          </Button>
-        </AlertDescription>
-      </Alert>
+      <div className="mx-auto max-w-2xl space-y-4 p-4">
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
+            <div className="space-y-2">
+              <p className="font-medium">Error loading data</p>
+              <p>{error}</p>
+              <Button onClick={fetchData} size="sm" variant="outline">
+                Retry
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      </div>
     );
   }
 
   return (
     <div className="space-y-6">
+      {/* Add Row */}
       <div className="flex items-center justify-between">
         <Button
           className="gap-2"
@@ -289,33 +297,29 @@ export default function EditableTable() {
           Add Row
         </Button>
         {editingRowId !== null && (
-          <p className="text-sm text-orange-600">
+          <p className="text-sm text-destructive">
             Finish editing the current row before adding a new one
           </p>
         )}
       </div>
 
-      {data.length === 0 ? (
+      {/* Table */}
+      {data.length === 0 && !editingRowId ? (
         <Alert>
-          <AlertDescription>
-            <div>
-              <strong>No data available</strong>
-              <p>
-                No records found. Click &quot;Add Row&quot; to create your first
-                record.
-              </p>
-            </div>
+          <AlertDescription className="space-y-2">
+            <p className="font-medium">No data available</p>
+            <p>Click &quot;Add Row&quot; to create your first record.</p>
           </AlertDescription>
         </Alert>
       ) : (
-        <div className="rounded-lg border">
+        <div className="rounded-md border">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead className="w-32">Actions</TableHead>
-                <TableHead className="w-32">Bought</TableHead>
-                <TableHead>Customer</TableHead>
-                <TableHead>Date</TableHead>
+                {columns.map(col => (
+                  <TableHead key={String(col.key)}>{col.label}</TableHead>
+                ))}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -324,135 +328,93 @@ export default function EditableTable() {
                 const isExistingRecord = isPersistentId(row.id);
 
                 return (
-                  <TableRow key={row.id}>
+                  <TableRow
+                    className={isEditing ? "bg-yellow-50" : ""}
+                    key={row.id}
+                  >
                     {/* Actions */}
-                    <TableCell className="w-32">
-                      {isEditing ? (
-                        <div className="flex gap-2">
-                          <Button
-                            aria-label="Cancel editing"
-                            className="h-8 w-8 p-0"
-                            disabled={saving}
-                            onClick={cancelEditing}
-                            size="sm"
-                            variant="ghost"
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            aria-label="Save changes"
-                            className="h-8 w-8 p-0"
-                            disabled={saving}
-                            onClick={saveRow}
-                            size="sm"
-                            variant="default"
-                          >
-                            {saving ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Save className="h-4 w-4" />
-                            )}
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="flex gap-2">
-                          <Button
-                            aria-label="Edit row"
-                            className="h-8 w-8 p-0"
-                            onClick={() => startEditing(row)}
-                            size="sm"
-                            variant="ghost"
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          {isExistingRecord && (
+                    <TableCell>
+                      <div className="flex gap-2">
+                        {isEditing ? (
+                          <>
                             <Button
-                              aria-label="Delete row"
-                              className={`
-                                h-8 w-8 p-0 text-red-600
-                                hover:bg-red-50 hover:text-red-700
-                              `}
-                              onClick={() => openDeleteConfirmModal(row.id)}
-                              size="sm"
+                              className="h-8 w-8"
+                              disabled={saving}
+                              onClick={cancelEditing}
+                              size="icon"
                               variant="ghost"
                             >
-                              <Trash2 className="h-4 w-4" />
+                              <X className="h-4 w-4" />
                             </Button>
-                          )}
-                        </div>
-                      )}
+                            <Button
+                              className="h-8 w-8"
+                              disabled={
+                                saving ||
+                                Object.keys(validationErrors).length > 0
+                              }
+                              onClick={saveRow}
+                              size="icon"
+                              variant="default"
+                            >
+                              {saving ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Save className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button
+                              className="h-8 w-8"
+                              onClick={() => startEditing(row)}
+                              size="icon"
+                              variant="ghost"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            {isExistingRecord && (
+                              <Button
+                                className={`
+                                  h-8 w-8 text-destructive
+                                  hover:bg-destructive/10 hover:text-destructive
+                                `}
+                                onClick={() => openDeleteConfirmModal(row.id)}
+                                size="icon"
+                                variant="ghost"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </>
+                        )}
+                      </div>
                     </TableCell>
 
-                    {/* Bought */}
-                    <TableCell className="w-32">
-                      {isEditing ? (
-                        <Checkbox
-                          checked={editedRow?.bought || false}
-                          disabled={saving}
-                          onCheckedChange={checked =>
-                            updateEditedRow({ bought: !!checked })
-                          }
-                        />
-                      ) : (
-                        <Checkbox checked={row.bought} disabled />
-                      )}
-                    </TableCell>
+                    {/* Dynamic Columns */}
+                    {columns.map(col => {
+                      if (isEditing && !editedRow) {
+                        return null;
+                      }
 
-                    {/* Customer */}
-                    <TableCell>
-                      {isEditing ? (
-                        <div className="space-y-1">
-                          <Input
-                            className={
-                              validationErrors.customer ? "border-red-500" : ""
-                            }
-                            disabled={saving}
-                            onChange={event =>
-                              updateEditedRow({ customer: event.target.value })
-                            }
-                            placeholder="Enter customer name"
-                            value={editedRow?.customer || ""}
-                          />
-                          {validationErrors.customer && (
-                            <p className="text-sm text-red-500">
-                              {validationErrors.customer}
-                            </p>
-                          )}
-                        </div>
-                      ) : (
-                        <span className={row.customer ? "" : "text-gray-400"}>
-                          {row.customer || "No customer"}
-                        </span>
-                      )}
-                    </TableCell>
+                      const safeRow = (isEditing ? editedRow : row) as T;
+                      const value = safeRow[col.key];
+                      const errorMessage = validationErrors[col.key as string];
 
-                    {/* Date */}
-                    <TableCell>
-                      {isEditing ? (
-                        <div className="space-y-1">
-                          <Input
-                            className={
-                              validationErrors.date ? "border-red-500" : ""
-                            }
-                            disabled={saving}
-                            onChange={event =>
-                              updateEditedRow({ date: event.target.value })
-                            }
-                            type="date"
-                            value={parseStringToDate(editedRow?.date)}
-                          />
-                          {validationErrors.date && (
-                            <p className="text-sm text-red-500">
-                              {validationErrors.date}
-                            </p>
+                      return (
+                        <TableCell key={String(col.key)}>
+                          {renderCell(
+                            col,
+                            value,
+                            row,
+                            isEditing,
+                            saving,
+                            errorMessage,
+                            updateEditedRow
                           )}
-                        </div>
-                      ) : (
-                        <span className={row.date ? "" : "text-gray-400"}>
-                          {row.date || "No date"}
-                        </span>
-                      )}
-                    </TableCell>
+                        </TableCell>
+                      );
+                    })}
                   </TableRow>
                 );
               })}
@@ -465,10 +427,10 @@ export default function EditableTable() {
       <Dialog onOpenChange={setDeleteModalOpen} open={deleteModalOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Confirm Delete</DialogTitle>
+            <DialogTitle>Confirm Deletion</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete this record? This action cannot be
-              undone.
+              This action cannot be undone. Are you sure you want to permanently
+              delete this record?
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -482,5 +444,63 @@ export default function EditableTable() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// -------------------- Cell Renderer --------------------
+function renderCell<T extends { id: number | string }>(
+  col: ColumnConfig<T>,
+  value: T[keyof T],
+  row: T,
+  isEditing: boolean,
+  saving: boolean,
+  errorMessage: string | undefined,
+  updateEditedRow: <K extends keyof T>(key: K, value: T[K]) => void
+) {
+  const isCheckbox = col.type === "checkbox" || typeof value === "boolean";
+
+  if (isEditing) {
+    return (
+      <div className="space-y-1">
+        {isCheckbox ? (
+          <Checkbox
+            checked={!!value}
+            disabled={saving}
+            onCheckedChange={checked =>
+              updateEditedRow(col.key, !!checked as T[keyof T])
+            }
+          />
+        ) : (
+          <Input
+            className={errorMessage ? "border-destructive" : ""}
+            disabled={saving}
+            onChange={event_ =>
+              updateEditedRow(col.key, event_.target.value as T[keyof T])
+            }
+            placeholder={col.placeholder}
+            type={col.type === "date" ? "date" : "text"}
+            value={String(value ?? "")}
+          />
+        )}
+        {errorMessage && (
+          <p className="text-sm text-destructive">{errorMessage}</p>
+        )}
+      </div>
+    );
+  }
+
+  // View mode
+  if (isCheckbox) {
+    return <Checkbox checked={!!value} disabled />;
+  }
+
+  if (col.render) {
+    return col.render(value, row);
+  }
+
+  return (
+    <span className={value ? "" : "text-muted-foreground"}>
+      {String(value) || "—"}
+    </span>
   );
 }

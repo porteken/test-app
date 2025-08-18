@@ -1,10 +1,10 @@
 import dynamic from "next/dynamic";
-const Test = dynamic(() => import("../components/table-pagination"));
+const Main = dynamic(() => import("../components/main"));
 
 export default function Home() {
   return (
     <>
-      <Test />
+      <Main />
     </>
   );
 }
