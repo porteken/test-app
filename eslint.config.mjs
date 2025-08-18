@@ -1,15 +1,14 @@
 //ts-check
 import pluginJs from "@eslint/js";
 import nextPlugin from "@next/eslint-plugin-next";
-import mantine from "eslint-config-mantine";
 import eslintConfigPrettier from "eslint-config-prettier";
+import eslintPluginBetterTailwindcss from "eslint-plugin-better-tailwindcss";
 import importPlugin from "eslint-plugin-import";
 import perfectionist from "eslint-plugin-perfectionist";
 import pluginPromise from "eslint-plugin-promise";
 import pluginReact from "eslint-plugin-react";
 import eslintPluginUnicorn from "eslint-plugin-unicorn";
 import globals from "globals";
-import eslintPluginBetterTailwindcss from "eslint-plugin-better-tailwindcss";
 export default [
   {
     files: ["**/*.{js,mjs,cjs,ts,jsx,tsx}"],
@@ -35,7 +34,6 @@ export default [
   eslintConfigPrettier,
   eslintPluginUnicorn.configs.recommended,
   perfectionist.configs["recommended-natural"],
-  ...mantine,
   {
     files: ["**/*.{jsx,tsx}"],
     languageOptions: {
