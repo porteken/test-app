@@ -130,6 +130,7 @@ export function DraggableEditableTable<T extends { id: number | string }>({
         const errorMessage =
           error_ instanceof Error ? error_.message : "Failed to update order";
         toast.error("Error updating order", { description: errorMessage });
+        // Revert to original order on failure
         fetchData();
       }
     },
@@ -176,23 +177,32 @@ export function DraggableEditableTable<T extends { id: number | string }>({
     const url = isNew ? apiBaseUrl : `${apiBaseUrl}/${editedRow.id}`;
     const method = isNew ? "POST" : "PUT";
 
+    // --- Start of Fix ---
+    // Create a payload object. If it's a new row, exclude the temporary ID.
+    const payload = { ...editedRow };
+    if (isNew) {
+      delete (payload as { id?: number | string }).id;
+    }
+    // --- End of Fix ---
+
     try {
       setSaving(true);
       const response = await fetch(url, {
-        body: JSON.stringify(editedRow),
+        body: JSON.stringify(payload), // Use the modified payload
         headers: { "Content-Type": "application/json" },
         method,
       });
+
       if (!response.ok) {
-        throw new Error(`Failed to save: ${response.statusText}`);
+        const errorBody = await response.json().catch(() => ({}));
+        throw new Error(
+          errorBody.message || `Failed to save: ${response.statusText}`
+        );
       }
       const saved = await response.json();
 
-      setData(current =>
-        isNew
-          ? [saved, ...current.filter(r => r.id !== editedRow.id)]
-          : current.map(r => (r.id === editedRow.id ? saved : r))
-      );
+      // Replace the temporary row with the server-confirmed row
+      setData(current => current.map(r => (r.id === editedRow.id ? saved : r)));
 
       toast.success(`Record ${isNew ? "created" : "updated"}`);
       setEditingRowId(null);
@@ -234,10 +244,15 @@ export function DraggableEditableTable<T extends { id: number | string }>({
 
   // -------------------- Add --------------------
   const addRow = useCallback(() => {
+    // Save any pending changes before adding a new row
+    if (hasUnsavedChanges) {
+      toast.warning("Please save or cancel your current changes first.");
+      return;
+    }
     const newRow = createNewRow(data.length);
     setData(previous => [newRow, ...previous]);
     startEditing(newRow);
-  }, [createNewRow, data.length, startEditing]);
+  }, [createNewRow, data.length, startEditing, hasUnsavedChanges]);
 
   // -------------------- Update Edited Row --------------------
   const updateEditedRow = useCallback(
@@ -289,7 +304,7 @@ export function DraggableEditableTable<T extends { id: number | string }>({
         </Button>
         {hasUnsavedChanges && (
           <p className="text-sm text-orange-600">
-            Finish editing before adding a new row
+            Save or cancel to add a new row
           </p>
         )}
       </div>
@@ -404,15 +419,18 @@ function SortableRow<T extends { id: number | string }>(properties: {
     >
       {/* Drag Handle */}
       <TableCell className="w-10">
-        <div
+        <button
           {...listeners}
+          aria-label="Drag to reorder"
           className={`
-            flex items-center justify-center
+            flex h-full w-full items-center justify-center
             ${isEditing ? "cursor-not-allowed opacity-50" : "cursor-grab"}
           `}
+          disabled={isEditing}
+          type="button"
         >
           <GripVertical className="h-4 w-4" />
-        </div>
+        </button>
       </TableCell>
 
       {/* Actions */}

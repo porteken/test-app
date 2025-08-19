@@ -50,47 +50,61 @@ export interface TableState {
 export const isPersistentId = (id: RowId | undefined): boolean =>
   typeof id === "number" || (typeof id === "string" && /^\d+$/.test(id));
 
+/**
+ * For <input type="date"> value
+ * Always treats strings like "YYYY-MM-DD" as local calendar dates
+ */
 export const formatDateForInput = (date: Date | null | string): string => {
-  if (!date) {
-    return "";
+  if (!date) return "";
+
+  if (typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return date;
   }
 
-  const dateObject = typeof date === "string" ? new Date(date) : date;
-  if (Number.isNaN(dateObject.getTime())) {
-    return "";
+  if (date instanceof Date && !Number.isNaN(date.getTime())) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
   }
 
-  return dateObject.toISOString().split("T")[0];
+  return "";
 };
 
+// For read-only display: if string is YYYY-MM-DD, format as local calendar date
 export const formatDateForDisplay = (date: Date | null | string): string => {
-  if (!date) {
-    return "—";
+  if (!date) return "—";
+
+  if (typeof date === "string") {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return "—";
+    }
+
+    const [year, month, day] = date.split("-").map(Number);
+    const localDate = new Date(year, month - 1, day);
+
+    return new Intl.DateTimeFormat(undefined, {
+      day: "numeric",
+      month: "numeric",
+      year: "numeric",
+    }).format(localDate);
   }
 
-  const dateObject = typeof date === "string" ? new Date(date) : date;
-  if (Number.isNaN(dateObject.getTime())) {
-    return "—";
+  if (date instanceof Date && !Number.isNaN(date.getTime())) {
+    return new Intl.DateTimeFormat(undefined, {
+      day: "numeric",
+      month: "numeric",
+      year: "numeric",
+    }).format(date);
   }
 
-  return dateObject.toLocaleDateString();
-};
-
-export const validateRequired = (
-  value: unknown,
-  fieldName: string
-): null | string => {
-  if (value === null || value === undefined || value === "") {
-    return `${fieldName} is required`;
-  }
-  return null;
+  return "—";
 };
 
 export const validateEmail = (value: unknown): null | string => {
   if (typeof value !== "string") {
     return null;
   }
-
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return emailRegex.test(value) ? null : "Please enter a valid email address";
 };
@@ -220,15 +234,31 @@ function CellRendererComponent<T extends { id: RowId }>({
   const isCheckbox = col.type === "checkbox" || typeof value === "boolean";
   const isDisabled = saving || col.disabled;
 
+  const displayValue = useMemo(() => {
+    if (value === null || value === undefined || value === "") {
+      return "—";
+    }
+
+    if (
+      col.type === "date" &&
+      (value instanceof Date || typeof value === "string")
+    ) {
+      return formatDateForDisplay(value);
+    }
+
+    if (col.type === "number" && typeof value === "number") {
+      return value.toLocaleString();
+    }
+
+    return String(value);
+  }, [value, col.type]);
+
   const handleInputChange = useCallback(
     (newValue: string) => {
       let processedValue: T[keyof T];
-
       switch (col.type) {
         case "date": {
-          processedValue = (
-            newValue === "" ? null : new Date(newValue)
-          ) as T[keyof T];
+          processedValue = (newValue === "" ? null : newValue) as T[keyof T];
           break;
         }
         case "number": {
@@ -241,7 +271,6 @@ function CellRendererComponent<T extends { id: RowId }>({
           processedValue = newValue as T[keyof T];
         }
       }
-
       updateEditedRow(col.key, processedValue);
     },
     [col.key, col.type, updateEditedRow]
@@ -331,9 +360,9 @@ function CellRendererComponent<T extends { id: RowId }>({
       }
     }
 
-    const displayValue =
-      col.type === "date" && value instanceof Date
-        ? formatDateForInput(value)
+    const inputValue =
+      col.type === "date" && value
+        ? formatDateForInput(value as Date | string)
         : String(value ?? "");
 
     return (
@@ -349,7 +378,7 @@ function CellRendererComponent<T extends { id: RowId }>({
           placeholder={col.placeholder}
           required={col.required}
           type={inputType}
-          value={displayValue}
+          value={inputValue}
         />
         {errorMessage && (
           <p
@@ -364,7 +393,6 @@ function CellRendererComponent<T extends { id: RowId }>({
     );
   }
 
-  // View mode rendering
   if (isCheckbox) {
     return <Checkbox aria-label={col.label} checked={!!value} disabled />;
   }
@@ -372,26 +400,6 @@ function CellRendererComponent<T extends { id: RowId }>({
   if (col.render) {
     return <>{col.render(value, row)}</>;
   }
-
-  // Enhanced display formatting
-  const displayValue = useMemo(() => {
-    if (value === null || value === undefined || value === "") {
-      return "—";
-    }
-
-    if (
-      col.type === "date" &&
-      (value instanceof Date || typeof value === "string")
-    ) {
-      return formatDateForDisplay(value);
-    }
-
-    if (col.type === "number" && typeof value === "number") {
-      return value.toLocaleString();
-    }
-
-    return String(value);
-  }, [value, col.type]);
 
   return (
     <span className={value ? "" : "text-muted-foreground"}>{displayValue}</span>

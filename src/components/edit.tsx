@@ -36,8 +36,8 @@ const columns: ColumnConfig<EditableRecord>[] = [
   {
     key: "date",
     label: "Date",
-    render: value =>
-      value ? new Date(value as string).toLocaleDateString() : "No date",
+    // ✅ OPTION 1: Remove render entirely (recommended)
+    // Your CellRenderer already handles date formatting correctly
     type: "date",
     validate: value => (value ? null : "Date is required"),
   },
