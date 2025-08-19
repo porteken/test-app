@@ -95,15 +95,15 @@ export type InfiniteSearchableSelectProperties<TData extends Entity> = {
   isError: boolean;
   isFetching: boolean;
   isFetchingNextPage: boolean;
-  itemToId: (item: TData) => string;
-  itemToName: (item: TData) => string;
+  itemToId: (_item: TData) => string;
+  itemToName: (_item: TData) => string;
   label: string;
-  onValueChange: (value: null | TData) => void;
+  onValueChange: (_value: null | TData) => void;
   placeholder: string;
   required?: boolean;
   search: string;
   selectedValue: null | TData;
-  setSearch: (search: string) => void;
+  setSearch: (_search: string) => void;
 };
 
 export function InfiniteSearchableSelect<TData extends Entity>({
@@ -161,7 +161,7 @@ export function InfiniteSearchableSelect<TData extends Entity>({
   );
 
   const handleClear = useCallback(
-    (event_: React.MouseEvent) => {
+    (event_: React.KeyboardEvent | React.MouseEvent) => {
       event_.preventDefault();
       event_.stopPropagation();
       onValueChange(null);
@@ -228,14 +228,15 @@ export function InfiniteSearchableSelect<TData extends Entity>({
               {selectedValue && !disabled && (
                 <span
                   className={`
-                    flex h-4 w-4 cursor-pointer items-center justify-center rounded p-0
+                    flex h-4 w-4 cursor-pointer items-center justify-center
+                    rounded p-0
                     hover:bg-gray-100
                   `}
                   onClick={handleClear}
                   onKeyDown={event_ => {
                     if (event_.key === "Enter" || event_.key === " ") {
                       event_.preventDefault();
-                      handleClear(event_ as any);
+                      handleClear(event_);
                     }
                   }}
                   role="button"
@@ -446,8 +447,8 @@ interface ConfigurableSelectProperties {
   isError: boolean;
   isFetching: boolean;
   isFetchingNextPage: boolean;
-  onSearchChange: (key: string, value: string) => void;
-  onSelectChange: (key: string, value: Entity | null) => void;
+  onSearchChange: (_key: string, _value: string) => void;
+  onSelectChange: (_key: string, _value: Entity | null) => void;
   search: string;
   selectedValue: Entity | null;
 }
@@ -504,8 +505,8 @@ interface FilterPanelProperties {
   filterConfigs: FilterConfig[];
   filters: FiltersState;
   onClearFilters: () => void;
-  onSearchChange: (key: string, value: string) => void;
-  onSelectChange: (key: string, value: Entity | null) => void;
+  onSearchChange: (_key: string, _value: string) => void;
+  onSelectChange: (_key: string, _value: Entity | null) => void;
 }
 
 export const FilterPanel = ({

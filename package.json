@@ -54,6 +54,7 @@
     "eslint-plugin-unicorn": "^60.0.0",
     "tailwindcss": "^4.1.12",
     "tw-animate-css": "^1.3.7",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.40.0"
   }
 }

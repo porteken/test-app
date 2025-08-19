@@ -58,7 +58,7 @@ export function EditableTable<T extends { id: number | string }>({
       if (!response.ok) {
         throw new Error(`Failed to fetch: ${response.statusText}`);
       }
-      const result = await response.json();
+      const result: T[] = await response.json();
       setData(result);
     } catch (error_) {
       const errorMessage =
@@ -127,7 +127,7 @@ export function EditableTable<T extends { id: number | string }>({
       if (!response.ok) {
         throw new Error(`Failed to save: ${response.statusText}`);
       }
-      const savedRecord = await response.json();
+      const savedRecord: T = await response.json();
 
       setData(current =>
         isNew
@@ -198,16 +198,22 @@ export function EditableTable<T extends { id: number | string }>({
 
   // -------------------- Add --------------------
   const addRow = useCallback(() => {
-    const newRow: any = { id: `new-${Date.now()}` };
+    const newRow = { id: `new-${Date.now()}` } as T;
+
+    // Type-safe initialization of columns
     for (const col of columns) {
+      const key = col.key as keyof T;
       if (col.type === "checkbox") {
-        newRow[col.key] = false;
+        (newRow as Record<keyof T, unknown>)[key] = false as T[keyof T];
       } else if (col.type === "date") {
-        newRow[col.key] = formatDateForInput(new Date());
+        (newRow as Record<keyof T, unknown>)[key] = formatDateForInput(
+          new Date()
+        ) as T[keyof T];
       } else {
-        newRow[col.key] = "";
+        (newRow as Record<keyof T, unknown>)[key] = "" as T[keyof T];
       }
     }
+
     setData(previous => [newRow, ...previous]);
     startEditing(newRow);
   }, [columns, startEditing]);

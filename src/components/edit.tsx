@@ -1,20 +1,24 @@
 "use client";
+import { ReactNode } from "react";
+
 import { EditableTable } from "./editable";
 
-interface ColumnConfig<T> {
-  key: keyof T;
+interface ColumnConfig<T, K extends keyof T = keyof T> {
+  key: K;
   label: string;
   placeholder?: string;
-  render?: (value: any, row: T) => React.ReactNode;
+  render?: (_value: T[K], _row: T) => ReactNode;
   type?: "checkbox" | "date" | "text";
-  validate?: (value: any, row: T) => null | string;
+  validate?: (_value: T[K], _row: T) => null | string;
 }
+
 interface EditableRecord {
   bought: boolean;
   customer: string;
   date: string;
   id: number | string;
 }
+
 const columns: ColumnConfig<EditableRecord>[] = [
   {
     key: "bought",
@@ -26,16 +30,19 @@ const columns: ColumnConfig<EditableRecord>[] = [
     label: "Customer",
     placeholder: "Customer name",
     type: "text",
-    validate: value => (value?.trim() ? null : "Customer name is required"),
+    validate: value =>
+      (value as string)?.trim() ? null : "Customer name is required",
   },
   {
     key: "date",
     label: "Date",
-    render: value => (value ? new Date(value).toLocaleDateString() : "No date"),
+    render: value =>
+      value ? new Date(value as string).toLocaleDateString() : "No date",
     type: "date",
     validate: value => (value ? null : "Date is required"),
   },
 ];
+
 export default function Page() {
   return (
     <EditableTable<EditableRecord>

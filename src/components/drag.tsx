@@ -1,5 +1,7 @@
 "use client";
-import { ColumnConfig, DraggableEditableTable } from "@/components/draggable";
+import { DraggableEditableTable } from "@/components/draggable";
+
+import { ColumnConfig } from "./table-common";
 
 interface DraggableRecord {
   customer: string;

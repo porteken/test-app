@@ -42,7 +42,7 @@ import {
 interface DraggableEditableTableProperties<T extends { id: number | string }> {
   apiBaseUrl: string;
   columns: ColumnConfig<T>[];
-  createNewRow: (position: number) => T;
+  createNewRow: (_position: number) => T;
 }
 
 // -------------------- Component --------------------
@@ -354,12 +354,12 @@ function SortableRow<T extends { id: number | string }>(properties: {
   columns: ColumnConfig<T>[];
   editedRow: null | T;
   isEditing: boolean;
-  openDeleteConfirmModal: (id: number | string) => void;
+  openDeleteConfirmModal: (_id: number | string) => void;
   row: T;
   saveRow: () => Promise<void>;
   saving: boolean;
-  startEditing: (row: T) => void;
-  updateEditedRow: <K extends keyof T>(key: K, value: T[K]) => void;
+  startEditing: (_row: T) => void;
+  updateEditedRow: <K extends keyof T>(_key: K, _value: T[K]) => void;
   validationErrors: Record<string, string>;
 }) {
   const {

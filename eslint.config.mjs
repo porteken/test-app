@@ -9,7 +9,8 @@ import pluginPromise from "eslint-plugin-promise";
 import pluginReact from "eslint-plugin-react";
 import eslintPluginUnicorn from "eslint-plugin-unicorn";
 import globals from "globals";
-export default [
+import tseslint from "typescript-eslint";
+export default tseslint.config([
   {
     files: ["**/*.{js,mjs,cjs,ts,jsx,tsx}"],
   },
@@ -26,6 +27,7 @@ export default [
       },
     },
   },
+  tseslint.configs.recommended,
   pluginJs.configs.recommended,
   importPlugin.flatConfigs.recommended,
   pluginPromise.configs["flat/recommended"],
@@ -51,12 +53,6 @@ export default [
       ...eslintPluginBetterTailwindcss.configs["recommended-warn"].rules,
       // enable all recommended rules to report an error
       ...eslintPluginBetterTailwindcss.configs["recommended-error"].rules,
-
-      // or configure rules individually
-      "better-tailwindcss/enforce-consistent-line-wrapping": [
-        "warn",
-        { printWidth: 100 },
-      ],
     },
     settings: {
       "better-tailwindcss": {
@@ -67,6 +63,10 @@ export default [
   },
   {
     rules: {
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        { argsIgnorePattern: "^_" },
+      ],
       "import/no-restricted-paths": [
         "error",
         {
@@ -95,6 +95,7 @@ export default [
         },
       ],
       "import/no-unresolved": "off",
+      "no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
       "react/jsx-uses-react": "error",
       "react/prop-types": "off",
       "unicorn/better-regex": "warn",
@@ -123,4 +124,4 @@ export default [
       "import/no-restricted-paths": "off",
     },
   },
-];
+]);

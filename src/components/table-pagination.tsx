@@ -72,7 +72,7 @@ type FiltersState = Record<string, Filter>;
 
 type ReusableDataTableProperties<T> = {
   apiConfig: ApiConfig;
-  columnConfigs: ColumnDef<T, any>[];
+  columnConfigs: ColumnDef<T, string>[];
   filterConfigs?: FilterConfig[]; // ✅ optional now
   pageSize?: number;
   queryClient?: QueryClient;

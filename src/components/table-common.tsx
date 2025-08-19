@@ -30,11 +30,11 @@ export interface ColumnConfig<T> {
   label: string;
   options?: { label: string; value: string }[];
   placeholder?: string;
-  render?: (value: T[keyof T], row: T) => React.ReactNode;
+  render?: (_value: T[keyof T], _row: T) => React.ReactNode;
   required?: boolean;
   sortable?: boolean;
   type?: "checkbox" | "date" | "email" | "number" | "select" | "text";
-  validate?: (value: T[keyof T], row: T) => null | string;
+  validate?: (_value: T[keyof T], _row: T) => null | string;
   width?: number | string;
 }
 
@@ -204,7 +204,7 @@ interface CellRendererProperties<T extends { id: RowId }> {
   isEditing: boolean;
   row: T;
   saving: boolean;
-  updateEditedRow: <K extends keyof T>(key: K, value: T[K]) => void;
+  updateEditedRow: <K extends keyof T>(_key: K, _value: T[K]) => void;
   value: T[keyof T];
 }
 
@@ -603,7 +603,8 @@ export const BulkActions = React.memo<BulkActionsProperties>(
     return (
       <div
         className={`
-          flex items-center justify-between rounded-md border border-blue-200 bg-blue-50 p-2
+          flex items-center justify-between rounded-md border border-blue-200
+          bg-blue-50 p-2
         `}
       >
         <div className="flex items-center space-x-4">
