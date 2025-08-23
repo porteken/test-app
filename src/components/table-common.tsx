@@ -25,17 +25,13 @@ import {
 
 // -------------------- Enhanced Types --------------------
 export interface ColumnConfig<T> {
-  disabled?: boolean;
   key: keyof T;
   label: string;
   options?: { label: string; value: string }[];
   placeholder?: string;
   render?: (_value: T[keyof T], _row: T) => React.ReactNode;
-  required?: boolean;
-  sortable?: boolean;
-  type?: "checkbox" | "date" | "email" | "number" | "select" | "text";
+  type?: "checkbox" | "date" | "number" | "select" | "text";
   validate?: (_value: T[keyof T], _row: T) => null | string;
-  width?: number | string;
 }
 
 export type RowId = number | string;
@@ -99,14 +95,6 @@ export const formatDateForDisplay = (date: Date | null | string): string => {
   }
 
   return "—";
-};
-
-export const validateEmail = (value: unknown): null | string => {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return emailRegex.test(value) ? null : "Please enter a valid email address";
 };
 
 // -------------------- Enhanced Action Buttons --------------------
@@ -232,7 +220,6 @@ function CellRendererComponent<T extends { id: RowId }>({
   value,
 }: CellRendererProperties<T>) {
   const isCheckbox = col.type === "checkbox" || typeof value === "boolean";
-  const isDisabled = saving || col.disabled;
 
   const displayValue = useMemo(() => {
     if (value === null || value === undefined || value === "") {
@@ -298,7 +285,7 @@ function CellRendererComponent<T extends { id: RowId }>({
             errorMessage ? `${col.key as string}-error` : undefined
           }
           checked={!!value}
-          disabled={isDisabled}
+          disabled={saving}
           onCheckedChange={handleCheckboxChange}
         />
       );
@@ -308,7 +295,7 @@ function CellRendererComponent<T extends { id: RowId }>({
       return (
         <div className="space-y-1">
           <Select
-            disabled={isDisabled}
+            disabled={saving}
             onValueChange={handleSelectChange}
             value={String(value ?? "")}
           >
@@ -347,10 +334,6 @@ function CellRendererComponent<T extends { id: RowId }>({
         inputType = "date";
         break;
       }
-      case "email": {
-        inputType = "email";
-        break;
-      }
       case "number": {
         inputType = "number";
         break;
@@ -373,10 +356,9 @@ function CellRendererComponent<T extends { id: RowId }>({
           }
           aria-invalid={!!errorMessage}
           className={errorMessage ? "border-destructive" : ""}
-          disabled={isDisabled}
+          disabled={saving}
           onChange={event_ => handleInputChange(event_.target.value)}
           placeholder={col.placeholder}
-          required={col.required}
           type={inputType}
           value={inputValue}
         />
@@ -419,7 +401,6 @@ interface DeleteDialogProperties {
   onClose: () => void;
   onConfirm: () => void;
   open: boolean;
-  title?: string;
 }
 
 export const DeleteDialog = React.memo<DeleteDialogProperties>(
@@ -431,7 +412,6 @@ export const DeleteDialog = React.memo<DeleteDialogProperties>(
     onClose,
     onConfirm,
     open,
-    title = "Confirm Deletion",
   }) => {
     const handleConfirm = useCallback(() => {
       if (!isDeleting) {
@@ -443,7 +423,7 @@ export const DeleteDialog = React.memo<DeleteDialogProperties>(
       <Dialog onOpenChange={onClose} open={open}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{title}</DialogTitle>
+            <DialogTitle>Confirm Deletion</DialogTitle>
             <DialogDescription>{description}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -476,27 +456,21 @@ DeleteDialog.displayName = "DeleteDialog";
 // -------------------- Enhanced Empty State --------------------
 export const TableEmptyState = React.memo<{
   action?: React.ReactNode;
-  description?: string;
-  title?: string;
-}>(
-  ({
-    action,
-    description = "Try adjusting your filters to see results.",
-    title = "No data available",
-  }) => {
-    return (
-      <Alert>
-        <AlertDescription>
-          <div className="space-y-3 text-center">
-            <p className="font-medium">{title}</p>
-            <p className="text-muted-foreground">{description}</p>
-            {action && <div className="pt-2">{action}</div>}
-          </div>
-        </AlertDescription>
-      </Alert>
-    );
-  }
-);
+}>(({ action }) => {
+  return (
+    <Alert>
+      <AlertDescription>
+        <div className="space-y-3 text-center">
+          <p className="font-medium">No data available</p>
+          <p className="text-muted-foreground">
+            Try adjusting your filters to see results.
+          </p>
+          {action && <div className="pt-2">{action}</div>}
+        </div>
+      </AlertDescription>
+    </Alert>
+  );
+});
 
 TableEmptyState.displayName = "TableEmptyState";
 

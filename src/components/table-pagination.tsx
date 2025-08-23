@@ -1,14 +1,22 @@
 "use client";
 
-import { QueryClient, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type ColumnDef,
   flexRender,
   getCoreRowModel,
   useReactTable,
 } from "@tanstack/react-table";
+import { MoreHorizontal } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Pagination,
   PaginationContent,
@@ -29,10 +37,11 @@ import {
 
 import { FilterPanel } from "./filter-panel";
 import {
+  DeleteDialog,
   TableEmptyState,
   TableErrorState,
   TableLoadingState,
-} from "./table-common";
+} from "./table-common"; // Assuming your new components are in 'table-common.tsx'
 
 // -------------------- Types --------------------
 export type InfiniteQueryPage<T> = {
@@ -45,6 +54,7 @@ type ApiConfig = {
   defaultLimit?: number;
   endpoints: {
     data: string;
+    delete?: string; // Endpoint for deletion, e.g., "/api/data"
     filters: string;
   };
 };
@@ -73,11 +83,10 @@ type FiltersState = Record<string, Filter>;
 type ReusableDataTableProperties<T> = {
   apiConfig: ApiConfig;
   columnConfigs: ColumnDef<T, string>[];
-  filterConfigs?: FilterConfig[]; // ✅ optional now
+  enableDelete?: boolean; // Prop to conditionally enable delete functionality
+  filterConfigs?: FilterConfig[];
   pageSize?: number;
-  queryClient?: QueryClient;
   showDebugInfo?: boolean;
-  title?: string;
 };
 
 // -------------------- Constants --------------------
@@ -197,18 +206,24 @@ const useTableData = <T,>(
 };
 
 // -------------------- Main Component --------------------
-export function ReusableDataTable<T>({
+// Enforce that the generic data type `T` must have a string `id`
+export function ReusableDataTable<T extends { id: string }>({
   apiConfig,
   columnConfigs,
+  enableDelete,
   filterConfigs,
   pageSize = DEFAULT_PAGE_SIZE,
-  title,
 }: ReusableDataTableProperties<T>) {
   const [filters, setFilters] = useState<FiltersState>(() =>
     generateInitialState(filterConfigs)
   );
   const debouncedFilters = useDebounce(filters, DEBOUNCE_DELAY_MS);
   const [currentPage, setCurrentPage] = useState(1);
+  const queryClient = useQueryClient();
+
+  // State to manage the delete dialog
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [rowToDelete, setRowToDelete] = useState<null | T>(null);
 
   const {
     data: tableData,
@@ -222,6 +237,52 @@ export function ReusableDataTable<T>({
     currentPage,
     pageSize
   );
+
+  // Delete mutation logic is now encapsulated within the component
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const deleteEndpoint = apiConfig.endpoints.delete;
+      if (!deleteEndpoint) {
+        throw new Error("Delete endpoint is not configured in apiConfig.");
+      }
+      const url = `${apiConfig.baseUrl}${deleteEndpoint}/${id}`;
+      const response = await fetch(url, { method: "DELETE" });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(
+          errorData.message || `Failed to delete item with ID ${id}`
+        );
+      }
+      return response.json();
+    },
+    onError: (error: Error) => {
+      console.error("Deletion failed:", error.message);
+      alert(`Failed to delete item: ${error.message}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["table-data"] });
+      setIsDeleteDialogOpen(false);
+      setRowToDelete(null);
+    },
+  });
+
+  const handleOpenDeleteDialog = useCallback((row: T) => {
+    setRowToDelete(row);
+    setIsDeleteDialogOpen(true);
+  }, []);
+
+  const handleCloseDeleteDialog = useCallback(() => {
+    if (deleteMutation.isPending) return;
+    setRowToDelete(null);
+    setIsDeleteDialogOpen(false);
+  }, [deleteMutation.isPending]);
+
+  const handleConfirmDelete = useCallback(() => {
+    if (rowToDelete) {
+      deleteMutation.mutate(rowToDelete.id);
+    }
+  }, [rowToDelete, deleteMutation]);
 
   const resetPage = useCallback(() => setCurrentPage(1), []);
 
@@ -258,8 +319,42 @@ export function ReusableDataTable<T>({
     [currentPage, totalPages]
   );
 
+  const finalColumns = useMemo(() => {
+    if (!enableDelete) {
+      return columnConfigs;
+    }
+
+    const actionColumn: ColumnDef<T, string> = {
+      cell: ({ row }) => (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button className="h-8 w-8 p-0" variant="ghost">
+              <span className="sr-only">Open menu</span>
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              className={`
+                text-red-600
+                focus:bg-red-50 focus:text-red-700
+              `}
+              onClick={() => handleOpenDeleteDialog(row.original)}
+            >
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ),
+      header: () => null,
+      id: "actions",
+    };
+
+    return [actionColumn, ...columnConfigs];
+  }, [columnConfigs, enableDelete, handleOpenDeleteDialog]);
+
   const table = useReactTable({
-    columns: columnConfigs,
+    columns: finalColumns,
     data: tableData?.data ?? [],
     getCoreRowModel: getCoreRowModel(),
   });
@@ -278,13 +373,10 @@ export function ReusableDataTable<T>({
     return <TableErrorState error={error} retry={() => setCurrentPage(1)} />;
   }
 
-  const rowCount = tableData?.data?.length ?? 0; // ✅ safe check
+  const rowCount = tableData?.data?.length ?? 0;
 
   return (
     <div className="space-y-6">
-      {title && <h2 className="text-lg font-semibold">{title}</h2>}
-
-      {/* ✅ Only render FilterPanel if filterConfigs provided */}
       {filterConfigs && filterConfigs.length > 0 && (
         <FilterPanel
           apiConfig={apiConfig}
@@ -343,7 +435,7 @@ export function ReusableDataTable<T>({
                     <TableRow>
                       <TableCell
                         className="h-24 text-center"
-                        colSpan={columnConfigs.length}
+                        colSpan={finalColumns.length}
                       >
                         No results.
                       </TableCell>
@@ -419,6 +511,13 @@ export function ReusableDataTable<T>({
           </>
         )}
       </div>
+
+      <DeleteDialog
+        isDeleting={deleteMutation.isPending}
+        onClose={handleCloseDeleteDialog}
+        onConfirm={handleConfirmDelete}
+        open={isDeleteDialogOpen}
+      />
     </div>
   );
 }

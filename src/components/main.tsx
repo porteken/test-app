@@ -6,7 +6,9 @@ import { useMemo } from "react";
 
 import { ReusableDataTable } from "./table-pagination";
 
+// ✅ 1. Ensure your data type includes a unique `id`
 type ProductData = {
+  id: string;
   product_name: string;
   store_name: string;
   user_name: string;
@@ -19,6 +21,7 @@ const apiConfig = {
   defaultLimit: 20,
   endpoints: {
     data: "/api/data",
+    delete: "/api/data", // ✅ 2. Specify the base path for the DELETE endpoint
     filters: "/api/filters",
   },
 };
@@ -67,6 +70,7 @@ export default function Home() {
       <ReusableDataTable
         apiConfig={apiConfig}
         columnConfigs={columnConfigs}
+        enableDelete // ✅ 3. Simply add the prop to enable the delete action
         filterConfigs={filterConfigs}
         pageSize={50}
       />
