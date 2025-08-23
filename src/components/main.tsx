@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createColumnHelper } from "@tanstack/react-table";
 import { useMemo } from "react";
 
-import { ReusableDataTable } from "./table-pagination";
+import { TablePagination } from "./table-pagination";
 
 // ✅ 1. Ensure your data type includes a unique `id`
 type ProductData = {
@@ -67,7 +67,7 @@ export default function Home() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <ReusableDataTable
+      <TablePagination
         apiConfig={apiConfig}
         columnConfigs={columnConfigs}
         enableDelete // ✅ 3. Simply add the prop to enable the delete action

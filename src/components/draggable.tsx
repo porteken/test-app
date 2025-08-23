@@ -15,11 +15,10 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertCircle, GripVertical, Loader2, Plus } from "lucide-react";
+import { GripVertical, Plus } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -36,6 +35,9 @@ import {
   ColumnConfig,
   DeleteDialog,
   isPersistentId,
+  TableEmptyState,
+  TableErrorState,
+  TableLoadingState,
 } from "./table-common";
 
 // -------------------- Props --------------------
@@ -62,7 +64,7 @@ export function DraggableEditableTable<T extends { id: number | string }>({
   >({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<null | string>(null);
+  const [error, setError] = useState<Error | null>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
   const sortableIds = useMemo(() => data.map(item => item.id), [data]);
@@ -80,10 +82,10 @@ export function DraggableEditableTable<T extends { id: number | string }>({
       const result = await response.json();
       setData(result);
     } catch (error_) {
-      const errorMessage =
-        error_ instanceof Error ? error_.message : "Failed to fetch data";
-      setError(errorMessage);
-      toast.error("Error fetching data", { description: errorMessage });
+      const error__ =
+        error_ instanceof Error ? error_ : new Error("Failed to fetch data");
+      setError(error__);
+      toast.error("Error fetching data", { description: error__.message });
     } finally {
       setLoading(false);
     }
@@ -177,18 +179,15 @@ export function DraggableEditableTable<T extends { id: number | string }>({
     const url = isNew ? apiBaseUrl : `${apiBaseUrl}/${editedRow.id}`;
     const method = isNew ? "POST" : "PUT";
 
-    // --- Start of Fix ---
-    // Create a payload object. If it's a new row, exclude the temporary ID.
     const payload = { ...editedRow };
     if (isNew) {
       delete (payload as { id?: number | string }).id;
     }
-    // --- End of Fix ---
 
     try {
       setSaving(true);
       const response = await fetch(url, {
-        body: JSON.stringify(payload), // Use the modified payload
+        body: JSON.stringify(payload),
         headers: { "Content-Type": "application/json" },
         method,
       });
@@ -201,7 +200,6 @@ export function DraggableEditableTable<T extends { id: number | string }>({
       }
       const saved = await response.json();
 
-      // Replace the temporary row with the server-confirmed row
       setData(current => current.map(r => (r.id === editedRow.id ? saved : r)));
 
       toast.success(`Record ${isNew ? "created" : "updated"}`);
@@ -244,7 +242,6 @@ export function DraggableEditableTable<T extends { id: number | string }>({
 
   // -------------------- Add --------------------
   const addRow = useCallback(() => {
-    // Save any pending changes before adding a new row
     if (hasUnsavedChanges) {
       toast.warning("Please save or cancel your current changes first.");
       return;
@@ -269,39 +266,36 @@ export function DraggableEditableTable<T extends { id: number | string }>({
     []
   );
 
-  // -------------------- Render --------------------
+  // -------------------- Render Logic --------------------
+  const addRowButton = (
+    <Button disabled={hasUnsavedChanges} onClick={addRow}>
+      <Plus className="mr-2 h-4 w-4" />
+      Add Row
+    </Button>
+  );
+
   if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center p-8">
-        <Loader2 className="h-8 w-8 animate-spin" />
-        <p>Loading...</p>
-      </div>
-    );
+    return <TableLoadingState />;
   }
 
   if (error && data.length === 0) {
+    return <TableErrorState error={error} retry={fetchData} />;
+  }
+
+  if (data.length === 0) {
     return (
-      <Alert className="max-w-2xl" variant="destructive">
-        <AlertCircle className="h-4 w-4" />
-        <AlertDescription>
-          <p className="font-medium">Error loading data</p>
-          <p>{error}</p>
-          <Button onClick={fetchData} size="sm" variant="outline">
-            Retry
-          </Button>
-        </AlertDescription>
-      </Alert>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">{addRowButton}</div>
+        <TableEmptyState action={addRowButton} />
+      </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      {/* Add Row */}
+      {/* Controls */}
       <div className="flex items-center justify-between">
-        <Button disabled={hasUnsavedChanges} onClick={addRow}>
-          <Plus className="mr-2 h-4 w-4" />
-          Add Row
-        </Button>
+        {addRowButton}
         {hasUnsavedChanges && (
           <p className="text-sm text-orange-600">
             Save or cancel to add a new row
@@ -363,7 +357,7 @@ export function DraggableEditableTable<T extends { id: number | string }>({
   );
 }
 
-// -------------------- Sortable Row --------------------
+// -------------------- Sortable Row (No Changes) --------------------
 function SortableRow<T extends { id: number | string }>(properties: {
   cancelEditing: () => void;
   columns: ColumnConfig<T>[];

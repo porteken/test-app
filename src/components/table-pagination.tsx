@@ -80,7 +80,7 @@ type FilterConfig = {
 
 type FiltersState = Record<string, Filter>;
 
-type ReusableDataTableProperties<T> = {
+type TablePaginationProperties<T> = {
   apiConfig: ApiConfig;
   columnConfigs: ColumnDef<T, string>[];
   enableDelete?: boolean; // Prop to conditionally enable delete functionality
@@ -207,13 +207,13 @@ const useTableData = <T,>(
 
 // -------------------- Main Component --------------------
 // Enforce that the generic data type `T` must have a string `id`
-export function ReusableDataTable<T extends { id: string }>({
+export function TablePagination<T extends { id: string }>({
   apiConfig,
   columnConfigs,
   enableDelete,
   filterConfigs,
   pageSize = DEFAULT_PAGE_SIZE,
-}: ReusableDataTableProperties<T>) {
+}: TablePaginationProperties<T>) {
   const [filters, setFilters] = useState<FiltersState>(() =>
     generateInitialState(filterConfigs)
   );

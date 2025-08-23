@@ -1,10 +1,9 @@
 "use client";
 
-import { AlertCircle, Loader2, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import React, { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -20,11 +19,15 @@ import {
   CellRenderer,
   ColumnConfig,
   DeleteDialog,
-  formatDateForInput,
+  formatDateForInput, // Restored this import
   isPersistentId,
+  TableEmptyState,
+  TableErrorState,
+  TableLoadingState,
 } from "./table-common";
 
 // -------------------- Props --------------------
+// createNewRow prop has been removed to fix the error
 interface EditableTableProperties<T extends { id: number | string }> {
   apiBaseUrl: string;
   columns: ColumnConfig<T>[];
@@ -46,7 +49,7 @@ export function EditableTable<T extends { id: number | string }>({
   >({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<null | string>(null);
+  const [error, setError] = useState<Error | null>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
   // -------------------- Fetch --------------------
@@ -61,13 +64,10 @@ export function EditableTable<T extends { id: number | string }>({
       const result: T[] = await response.json();
       setData(result);
     } catch (error_) {
-      const errorMessage =
-        error_ instanceof Error ? error_.message : "Failed to fetch data";
-      setError(errorMessage);
-      toast.error("Error loading data", {
-        description: errorMessage,
-        icon: <AlertCircle className="h-4 w-4" />,
-      });
+      const error__ =
+        error_ instanceof Error ? error_ : new Error("Failed to fetch data");
+      setError(error__);
+      toast.error("Error loading data", { description: error__.message });
     } finally {
       setLoading(false);
     }
@@ -98,7 +98,6 @@ export function EditableTable<T extends { id: number | string }>({
       return;
     }
 
-    // Run validations
     const errors: Record<string, string> = {};
     for (const col of columns) {
       if (col.validate) {
@@ -142,10 +141,7 @@ export function EditableTable<T extends { id: number | string }>({
     } catch (error_) {
       const errorMessage =
         error_ instanceof Error ? error_.message : "Failed to save record";
-      toast.error("Error saving record", {
-        description: errorMessage,
-        icon: <AlertCircle className="h-4 w-4" />,
-      });
+      toast.error("Error saving record", { description: errorMessage });
     } finally {
       setSaving(false);
     }
@@ -169,35 +165,26 @@ export function EditableTable<T extends { id: number | string }>({
       if (!response.ok) {
         throw new Error(`Failed to delete: ${response.statusText}`);
       }
-      const deletedRow = data.find(r => r.id === rowToDelete);
       setData(current => current.filter(row => row.id !== rowToDelete));
-
-      toast("Record deleted", {
-        action: {
-          label: "Undo",
-          onClick: () => {
-            if (deletedRow) {
-              setData(current => [deletedRow, ...current]);
-            }
-          },
-        },
-        description: "You can undo this action",
-      });
+      toast.success("Record deleted successfully");
     } catch (error_) {
       const errorMessage =
         error_ instanceof Error ? error_.message : "Failed to delete record";
-      toast.error("Error deleting record", {
-        description: errorMessage,
-        icon: <AlertCircle className="h-4 w-4" />,
-      });
+      toast.error("Error deleting record", { description: errorMessage });
     } finally {
       setDeleteModalOpen(false);
       setRowToDelete(null);
     }
-  }, [rowToDelete, data, apiBaseUrl]);
+  }, [rowToDelete, apiBaseUrl]);
 
   // -------------------- Add --------------------
+  // Restored original addRow logic
   const addRow = useCallback(() => {
+    if (editingRowId !== null) {
+      toast.warning("Please save or cancel your current changes first.");
+      return;
+    }
+
     const newRow = { id: `new-${Date.now()}` } as T;
 
     // Type-safe initialization of columns
@@ -216,7 +203,7 @@ export function EditableTable<T extends { id: number | string }>({
 
     setData(previous => [newRow, ...previous]);
     startEditing(newRow);
-  }, [columns, startEditing]);
+  }, [columns, startEditing, editingRowId]);
 
   // -------------------- Update Edited Row --------------------
   const updateEditedRow = useCallback(
@@ -235,60 +222,35 @@ export function EditableTable<T extends { id: number | string }>({
 
   // -------------------- Render --------------------
   if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center space-y-4 p-8">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-        <p className="text-muted-foreground">Loading data...</p>
-      </div>
-    );
+    return <TableLoadingState />;
   }
 
   if (error && data.length === 0) {
-    return (
-      <div className="mx-auto max-w-2xl space-y-4 p-4">
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>
-            <div className="space-y-2">
-              <p className="font-medium">Error loading data</p>
-              <p>{error}</p>
-              <Button onClick={fetchData} size="sm" variant="outline">
-                Retry
-              </Button>
-            </div>
-          </AlertDescription>
-        </Alert>
-      </div>
-    );
+    return <TableErrorState error={error} retry={fetchData} />;
   }
+
+  const addRowButton = (
+    <Button className="gap-2" disabled={editingRowId !== null} onClick={addRow}>
+      <Plus className="h-4 w-4" />
+      Add Row
+    </Button>
+  );
 
   return (
     <div className="space-y-6">
-      {/* Add Row */}
+      {/* Controls */}
       <div className="flex items-center justify-between">
-        <Button
-          className="gap-2"
-          disabled={editingRowId !== null}
-          onClick={addRow}
-        >
-          <Plus className="h-4 w-4" />
-          Add Row
-        </Button>
+        {addRowButton}
         {editingRowId !== null && (
           <p className="text-sm text-destructive">
-            Finish editing the current row before adding a new one
+            Finish editing to add a new row
           </p>
         )}
       </div>
 
       {/* Table */}
       {data.length === 0 && !editingRowId ? (
-        <Alert>
-          <AlertDescription className="space-y-2">
-            <p className="font-medium">No data available</p>
-            <p>Click &quot;Add Row&quot; to create your first record.</p>
-          </AlertDescription>
-        </Alert>
+        <TableEmptyState action={addRowButton} />
       ) : (
         <div className="rounded-md border">
           <Table>
