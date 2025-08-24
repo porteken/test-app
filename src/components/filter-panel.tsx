@@ -534,6 +534,7 @@ export const FilterPanel = ({
       {/* Clear All button below title */}
       {hasActiveFilters && (
         <Button
+          aria-label="Clear all filters"
           className="w-fit text-sm"
           disabled={disabled}
           onClick={onClearFilters}

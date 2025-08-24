@@ -383,6 +383,7 @@ export const DeleteDialog = React.memo<DeleteDialogProperties>(
               {cancelText}
             </Button>
             <Button
+              aria-label="Confirm delete"
               disabled={isDeleting}
               onClick={handleConfirm}
               variant="destructive"

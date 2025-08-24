@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import React from "react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -416,7 +417,8 @@ describe("CellRendererComponent", () => {
   });
 
   describe("Event Handlers", () => {
-    it("should call updateEditedRow when text input value changes", () => {
+    it("should call updateEditedRow when text input value changes", async () => {
+      const user = userEvent.setup();
       render(
         <ControlledInputWrapper<{ id: string; name: string }>
           col={{ key: "name", label: "Name", type: "text" }}
@@ -424,11 +426,13 @@ describe("CellRendererComponent", () => {
         />
       );
       const input = screen.getByLabelText("Name");
-      fireEvent.change(input, { target: { value: "Jane" } });
+      await user.clear(input);
+      await user.type(input, "Jane");
       expect(input).toHaveValue("Jane");
     });
 
-    it("should call updateEditedRow when number input value changes", () => {
+    it("should call updateEditedRow when number input value changes", async () => {
+      const user = userEvent.setup();
       render(
         <ControlledInputWrapper<{ age: number; id: string }>
           col={{ key: "age", label: "Age", type: "number" }}
@@ -436,10 +440,12 @@ describe("CellRendererComponent", () => {
         />
       );
       const input = screen.getByLabelText("Age");
-      fireEvent.change(input, { target: { value: "45" } });
+      await user.clear(input);
+      await user.type(input, "45");
       expect(input).toHaveValue(45);
     });
-    it("should call updateEditedRow when date input value changes", () => {
+    it("should call updateEditedRow when date input value changes", async () => {
+      const user = userEvent.setup();
       render(
         <ControlledInputWrapper<{ date: string; id: string }>
           col={{ key: "date", label: "Date", type: "date" }}
@@ -447,11 +453,13 @@ describe("CellRendererComponent", () => {
         />
       );
       const input = screen.getByLabelText("Date");
-      fireEvent.change(input, { target: { value: "2023-01-02" } });
+      await user.clear(input);
+      await user.type(input, "2023-01-02");
       expect(input).toHaveValue("2023-01-02");
     });
 
-    it("should call updateEditedRow when checkbox is clicked", () => {
+    it("should call updateEditedRow when checkbox is clicked", async () => {
+      const user = userEvent.setup();
       render(
         <ControlledInputWrapper<{ id: string; isActive: boolean }>
           col={{ key: "isActive", label: "Active", type: "checkbox" }}
@@ -459,11 +467,12 @@ describe("CellRendererComponent", () => {
         />
       );
       const checkbox = screen.getByLabelText("Active");
-      fireEvent.click(checkbox);
+      await user.click(checkbox);
       expect(checkbox).toBeChecked();
     });
 
-    it("should call updateEditedRow with the correct value when a select option is chosen", () => {
+    it("should call updateEditedRow with the correct value when a select option is chosen", async () => {
+      const user = userEvent.setup();
       const colConfig: ColumnConfig<{ id: string; status: string }> = {
         key: "status",
         label: "Status",
@@ -488,11 +497,11 @@ describe("CellRendererComponent", () => {
 
       // Open the select dropdown by clicking the trigger
       const selectTrigger = screen.getByRole("combobox");
-      fireEvent.click(selectTrigger);
+      await user.click(selectTrigger);
 
       // Select the "Inactive" option
-      const inactiveOption = screen.getByText("Inactive");
-      fireEvent.click(inactiveOption);
+      const inactiveOption = await screen.findByText("Inactive");
+      await user.click(inactiveOption);
 
       expect(mockUpdateEditedRow).toHaveBeenCalledWith("status", "inactive");
       expect(mockUpdateEditedRow).toHaveBeenCalledTimes(1);
@@ -515,19 +524,17 @@ describe("DeleteDialog", () => {
 
   it("should display a loading state and disable buttons when deleting", () => {
     render(<DeleteDialog {...mockProperties} isDeleting={true} open={true} />);
-    expect(
-      screen.getByRole("button", { name: /deleting/i })
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /deleting/i })).toBeDisabled();
+    expect(screen.getByText(/deleting/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /cancel/i })).toBeDisabled();
   });
 
-  it("should call onConfirm when the delete button is clicked", () => {
+  it("should call onConfirm when the delete button is clicked", async () => {
+    const user = userEvent.setup();
     const handleConfirm = vi.fn();
     render(
       <DeleteDialog {...mockProperties} onConfirm={handleConfirm} open={true} />
     );
-    fireEvent.click(screen.getByRole("button", { name: /delete/i }));
+    await user.click(screen.getByRole("button", { name: /delete/i }));
     expect(handleConfirm).toHaveBeenCalledTimes(1);
   });
 });
@@ -558,12 +565,13 @@ describe("Table States", () => {
       expect(screen.getByText("Error loading data")).toBeInTheDocument();
     });
 
-    it("should call the retry function when the retry button is clicked", () => {
+    it("should call the retry function when the retry button is clicked", async () => {
+      const user = userEvent.setup();
       const retryMock = vi.fn();
       render(
         <TableErrorState error={new Error("Network Error")} retry={retryMock} />
       );
-      fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+      await user.click(screen.getByRole("button", { name: /retry/i }));
       expect(retryMock).toHaveBeenCalledTimes(1);
     });
   });

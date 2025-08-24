@@ -94,57 +94,7 @@ const DEFAULT_PAGE_SIZE = 50;
 const DEBOUNCE_DELAY_MS = 300;
 const STALE_TIME_MS = 30_000;
 const GC_TIME_MS = 5 * 60 * 1000;
-
-// -------------------- Helpers --------------------
-const generateInitialState = (configs: FilterConfig[] = []): FiltersState => {
-  const accumulator: FiltersState = {};
-  for (const config of configs) {
-    accumulator[config.key] = { search: "", selected: null };
-  }
-  return accumulator;
-};
-
-const useDebounce = <T,>(value: T, delay: number): T => {
-  const [debouncedValue, setDebouncedValue] = useState<T>(value);
-  useEffect(() => {
-    const handler = setTimeout(() => setDebouncedValue(value), delay);
-    return () => clearTimeout(handler);
-  }, [value, delay]);
-  return debouncedValue;
-};
-
-const fetchTableData = async <T,>(
-  apiFilters: Record<string, string>,
-  page: number,
-  limit: number,
-  apiConfig: ApiConfig
-): Promise<{ data: T[]; hasMore: boolean; total: number }> => {
-  const parameters = new URLSearchParams({
-    limit: limit.toString(),
-    page: page.toString(),
-  });
-
-  for (const [key, value] of Object.entries(apiFilters)) {
-    if (value) {
-      parameters.append(key, value);
-    }
-  }
-
-  const url = `${apiConfig.baseUrl}${apiConfig.endpoints.data}?${parameters}`;
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch table data: ${response.statusText}`);
-  }
-
-  const result: ApiResponse<T> = await response.json();
-  return {
-    data: result.data,
-    hasMore: !!result.next,
-    total: result.total || 0,
-  };
-};
-
-const generatePaginationRange = (
+export const generatePaginationRange = (
   currentPage: number,
   totalPages: number
 ): (number | string)[] => {
@@ -174,6 +124,54 @@ const generatePaginationRange = (
     "...",
     totalPages,
   ];
+};
+// -------------------- Helpers --------------------
+const generateInitialState = (configs: FilterConfig[] = []): FiltersState => {
+  const accumulator: FiltersState = {};
+  for (const config of configs) {
+    accumulator[config.key] = { search: "", selected: null };
+  }
+  return accumulator;
+};
+
+const useDebounce = <T,>(value: T, delay: number): T => {
+  const [debouncedValue, setDebouncedValue] = useState<T>(value);
+  useEffect(() => {
+    const handler = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(handler);
+  }, [value, delay]);
+  return debouncedValue;
+};
+
+export const fetchTableData = async <T,>(
+  apiFilters: Record<string, string>,
+  page: number,
+  limit: number,
+  apiConfig: ApiConfig
+): Promise<{ data: T[]; hasMore: boolean; total: number }> => {
+  const parameters = new URLSearchParams({
+    limit: limit.toString(),
+    page: page.toString(),
+  });
+
+  for (const [key, value] of Object.entries(apiFilters)) {
+    if (value) {
+      parameters.append(key, value);
+    }
+  }
+
+  const url = `${apiConfig.baseUrl}${apiConfig.endpoints.data}?${parameters}`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch table data: ${response.statusText}`);
+  }
+
+  const result: ApiResponse<T> = await response.json();
+  return {
+    data: result.data,
+    hasMore: !!result.next,
+    total: result.total || 0,
+  };
 };
 
 // -------------------- Data Hook --------------------
@@ -328,7 +326,11 @@ export function TablePagination<T extends { id: string }>({
       cell: ({ row }) => (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button className="h-8 w-8 p-0" variant="ghost">
+            <Button
+              aria-label="Open menu"
+              className="h-8 w-8 p-0"
+              variant="ghost"
+            >
               <span className="sr-only">Open menu</span>
               <MoreHorizontal className="h-4 w-4" />
             </Button>
@@ -397,18 +399,16 @@ export function TablePagination<T extends { id: string }>({
         {!isLoading && rowCount > 0 && (
           <>
             <div className="rounded-lg border">
-              <Table>
+              <Table aria-label="table">
                 <TableHeader>
                   {table.getHeaderGroups().map(headerGroup => (
                     <TableRow key={headerGroup.id}>
                       {headerGroup.headers.map(header => (
                         <TableHead key={header.id}>
-                          {header.isPlaceholder
-                            ? undefined
-                            : flexRender(
-                                header.column.columnDef.header,
-                                header.getContext()
-                              )}
+                          {flexRender(
+                            header.column.columnDef.header,
+                            header.getContext()
+                          )}
                         </TableHead>
                       ))}
                     </TableRow>
@@ -417,10 +417,7 @@ export function TablePagination<T extends { id: string }>({
                 <TableBody>
                   {table.getRowModel().rows?.length ? (
                     table.getRowModel().rows.map(row => (
-                      <TableRow
-                        data-state={row.getIsSelected() && "selected"}
-                        key={row.id}
-                      >
+                      <TableRow data-state={row.getIsSelected()} key={row.id}>
                         {row.getVisibleCells().map(cell => (
                           <TableCell key={cell.id}>
                             {flexRender(
@@ -452,6 +449,7 @@ export function TablePagination<T extends { id: string }>({
                     <PaginationItem>
                       <PaginationPrevious
                         aria-disabled={currentPage === 1}
+                        aria-label="Go to previous page"
                         className={
                           currentPage === 1
                             ? "pointer-events-none opacity-50"
@@ -473,7 +471,10 @@ export function TablePagination<T extends { id: string }>({
                           <PaginationEllipsis />
                         </PaginationItem>
                       ) : (
-                        <PaginationItem key={page}>
+                        <PaginationItem
+                          aria-label={`Go to page ${page}`}
+                          key={page}
+                        >
                           <PaginationLink
                             href="#"
                             isActive={currentPage === page}
@@ -490,6 +491,7 @@ export function TablePagination<T extends { id: string }>({
                     <PaginationItem>
                       <PaginationNext
                         aria-disabled={currentPage === totalPages}
+                        aria-label="Go to next page"
                         className={
                           currentPage === totalPages
                             ? "pointer-events-none opacity-50"
