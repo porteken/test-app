@@ -1,5 +1,4 @@
 "use client";
-import { ReactNode } from "react";
 
 import { EditableTable } from "./editable";
 
@@ -7,7 +6,6 @@ interface ColumnConfig<T, K extends keyof T = keyof T> {
   key: K;
   label: string;
   placeholder?: string;
-  render?: (_value: T[K], _row: T) => ReactNode;
   type?: "checkbox" | "date" | "text";
   validate?: (_value: T[K], _row: T) => null | string;
 }

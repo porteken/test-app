@@ -451,7 +451,6 @@ function SortableRow<T extends { id: number | string }>(properties: {
               col={col}
               errorMessage={errorMessage}
               isEditing={isEditing}
-              row={row}
               saving={saving}
               updateEditedRow={updateEditedRow}
               value={value}

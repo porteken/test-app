@@ -29,7 +29,6 @@ export interface ColumnConfig<T> {
   label: string;
   options?: { label: string; value: string }[];
   placeholder?: string;
-  render?: (_value: T[keyof T], _row: T) => React.ReactNode;
   type?: "checkbox" | "date" | "number" | "select" | "text";
   validate?: (_value: T[keyof T], _row: T) => null | string;
 }
@@ -45,57 +44,6 @@ export interface TableState {
 // -------------------- Enhanced Utils --------------------
 export const isPersistentId = (id: RowId | undefined): boolean =>
   typeof id === "number" || (typeof id === "string" && /^\d+$/.test(id));
-
-/**
- * For <input type="date"> value
- * Always treats strings like "YYYY-MM-DD" as local calendar dates
- */
-export const formatDateForInput = (date: Date | null | string): string => {
-  if (!date) return "";
-
-  if (typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    return date;
-  }
-
-  if (date instanceof Date && !Number.isNaN(date.getTime())) {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, "0");
-    const d = String(date.getDate()).padStart(2, "0");
-    return `${y}-${m}-${d}`;
-  }
-
-  return "";
-};
-
-// For read-only display: if string is YYYY-MM-DD, format as local calendar date
-export const formatDateForDisplay = (date: Date | null | string): string => {
-  if (!date) return "—";
-
-  if (typeof date === "string") {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      return "—";
-    }
-
-    const [year, month, day] = date.split("-").map(Number);
-    const localDate = new Date(year, month - 1, day);
-
-    return new Intl.DateTimeFormat(undefined, {
-      day: "numeric",
-      month: "numeric",
-      year: "numeric",
-    }).format(localDate);
-  }
-
-  if (date instanceof Date && !Number.isNaN(date.getTime())) {
-    return new Intl.DateTimeFormat(undefined, {
-      day: "numeric",
-      month: "numeric",
-      year: "numeric",
-    }).format(date);
-  }
-
-  return "—";
-};
 
 // -------------------- Enhanced Action Buttons --------------------
 interface ActionButtonsProperties {
@@ -204,17 +152,15 @@ interface CellRendererProperties<T extends { id: RowId }> {
   col: ColumnConfig<T>;
   errorMessage?: string;
   isEditing: boolean;
-  row: T;
   saving: boolean;
   updateEditedRow: <K extends keyof T>(_key: K, _value: T[K]) => void;
   value: T[keyof T];
 }
 
-function CellRendererComponent<T extends { id: RowId }>({
+export function CellRendererComponent<T extends { id: RowId }>({
   col,
   errorMessage,
   isEditing,
-  row,
   saving,
   updateEditedRow,
   value,
@@ -222,15 +168,32 @@ function CellRendererComponent<T extends { id: RowId }>({
   const isCheckbox = col.type === "checkbox" || typeof value === "boolean";
 
   const displayValue = useMemo(() => {
-    if (value === null || value === undefined || value === "") {
-      return "—";
-    }
-
     if (
       col.type === "date" &&
       (value instanceof Date || typeof value === "string")
     ) {
-      return formatDateForDisplay(value);
+      if (typeof value === "string") {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+          return "Invalid Date";
+        }
+
+        const [year, month, day] = value.split("-").map(Number);
+        const localDate = new Date(year, month - 1, day);
+
+        return new Intl.DateTimeFormat(undefined, {
+          day: "numeric",
+          month: "numeric",
+          year: "numeric",
+        }).format(localDate);
+      }
+
+      if (value instanceof Date && !Number.isNaN(value.getTime())) {
+        return new Intl.DateTimeFormat(undefined, {
+          day: "numeric",
+          month: "numeric",
+          year: "numeric",
+        }).format(value);
+      }
     }
 
     if (col.type === "number" && typeof value === "number") {
@@ -245,13 +208,11 @@ function CellRendererComponent<T extends { id: RowId }>({
       let processedValue: T[keyof T];
       switch (col.type) {
         case "date": {
-          processedValue = (newValue === "" ? null : newValue) as T[keyof T];
+          processedValue = newValue as T[keyof T];
           break;
         }
         case "number": {
-          processedValue = (
-            newValue === "" ? null : Number(newValue)
-          ) as T[keyof T];
+          processedValue = Number(newValue) as T[keyof T];
           break;
         }
         default: {
@@ -284,6 +245,7 @@ function CellRendererComponent<T extends { id: RowId }>({
           aria-describedby={
             errorMessage ? `${col.key as string}-error` : undefined
           }
+          aria-label={col.label}
           checked={!!value}
           disabled={saving}
           onCheckedChange={handleCheckboxChange}
@@ -295,9 +257,10 @@ function CellRendererComponent<T extends { id: RowId }>({
       return (
         <div className="space-y-1">
           <Select
+            aria-label={col.label}
             disabled={saving}
             onValueChange={handleSelectChange}
-            value={String(value ?? "")}
+            value={String(value)}
           >
             <SelectTrigger
               aria-describedby={
@@ -342,12 +305,6 @@ function CellRendererComponent<T extends { id: RowId }>({
         inputType = "text";
       }
     }
-
-    const inputValue =
-      col.type === "date" && value
-        ? formatDateForInput(value as Date | string)
-        : String(value ?? "");
-
     return (
       <div className="space-y-1">
         <Input
@@ -355,12 +312,13 @@ function CellRendererComponent<T extends { id: RowId }>({
             errorMessage ? `${col.key as string}-error` : undefined
           }
           aria-invalid={!!errorMessage}
+          aria-label={col.label}
           className={errorMessage ? "border-destructive" : ""}
           disabled={saving}
           onChange={event_ => handleInputChange(event_.target.value)}
           placeholder={col.placeholder}
           type={inputType}
-          value={inputValue}
+          value={String(value)}
         />
         {errorMessage && (
           <p
@@ -377,10 +335,6 @@ function CellRendererComponent<T extends { id: RowId }>({
 
   if (isCheckbox) {
     return <Checkbox aria-label={col.label} checked={!!value} disabled />;
-  }
-
-  if (col.render) {
-    return <>{col.render(value, row)}</>;
   }
 
   return (
@@ -478,16 +432,9 @@ TableEmptyState.displayName = "TableEmptyState";
 export const TableErrorState = React.memo<{
   error: unknown;
   retry?: () => void;
-  retrying?: boolean;
-}>(({ error, retry, retrying = false }) => {
+}>(({ error, retry }) => {
   const message =
     error instanceof Error ? error.message : "An unknown error occurred";
-
-  const handleRetry = useCallback(() => {
-    if (!retrying && retry) {
-      retry();
-    }
-  }, [retry, retrying]);
 
   return (
     <Alert className="max-w-2xl" variant="destructive">
@@ -499,19 +446,11 @@ export const TableErrorState = React.memo<{
           {retry && (
             <Button
               className="mt-2"
-              disabled={retrying}
-              onClick={handleRetry}
+              onClick={retry}
               size="sm"
               variant="outline"
             >
-              {retrying ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Retrying...
-                </>
-              ) : (
-                "Retry"
-              )}
+              Retry
             </Button>
           )}
         </div>
@@ -523,104 +462,29 @@ export const TableErrorState = React.memo<{
 TableErrorState.displayName = "TableErrorState";
 
 // -------------------- Enhanced Loading State --------------------
-interface TableLoadingStateProperties {
-  message?: string;
-  rows?: number;
-}
 
-export const TableLoadingState = React.memo<TableLoadingStateProperties>(
-  ({ message = "Loading data...", rows = 5 }) => {
-    const skeletonRows = Array.from({ length: rows }, (_, index) => index);
+export const TableLoadingState = React.memo(() => {
+  const skeletonRows = Array.from({ length: 5 }, (_, index) => index);
 
-    return (
-      <div className="space-y-4">
-        <div className="flex flex-col items-center justify-center space-y-4 p-8">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-          <p className="text-muted-foreground">{message}</p>
-        </div>
-
-        {/* Optional: Skeleton loading rows */}
-        <div className="space-y-2">
-          {skeletonRows.map(index => (
-            <div className="flex animate-pulse space-x-4" key={index}>
-              <div className="h-4 flex-1 rounded bg-gray-200" />
-              <div className="h-4 w-24 rounded bg-gray-200" />
-              <div className="h-4 w-16 rounded bg-gray-200" />
-            </div>
-          ))}
-        </div>
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col items-center justify-center space-y-4 p-8">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <p className="text-muted-foreground">Loading data...</p>
       </div>
-    );
-  }
-);
+
+      {/* Optional: Skeleton loading rows */}
+      <div className="space-y-2">
+        {skeletonRows.map(index => (
+          <div className="flex animate-pulse space-x-4" key={index}>
+            <div className="h-4 flex-1 rounded bg-gray-200" />
+            <div className="h-4 w-24 rounded bg-gray-200" />
+            <div className="h-4 w-16 rounded bg-gray-200" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+});
 
 TableLoadingState.displayName = "TableLoadingState";
-
-// -------------------- New: Bulk Actions Component --------------------
-interface BulkActionsProperties {
-  actions?: Array<{
-    disabled?: boolean;
-    label: string;
-    onClick: () => void;
-    variant?: "default" | "destructive" | "outline";
-  }>;
-  onClearSelection: () => void;
-  onSelectAll: () => void;
-  selectedCount: number;
-  totalCount: number;
-}
-
-export const BulkActions = React.memo<BulkActionsProperties>(
-  ({
-    actions = [],
-    onClearSelection,
-    onSelectAll,
-    selectedCount,
-    totalCount,
-  }) => {
-    if (selectedCount === 0) {
-      return null;
-    }
-
-    return (
-      <div
-        className={`
-          flex items-center justify-between rounded-md border border-blue-200
-          bg-blue-50 p-2
-        `}
-      >
-        <div className="flex items-center space-x-4">
-          <span className="text-sm font-medium">
-            {selectedCount} of {totalCount} selected
-          </span>
-          <div className="flex space-x-2">
-            <Button onClick={onSelectAll} size="sm" variant="outline">
-              Select All
-            </Button>
-            <Button onClick={onClearSelection} size="sm" variant="outline">
-              Clear Selection
-            </Button>
-          </div>
-        </div>
-
-        {actions.length > 0 && (
-          <div className="flex space-x-2">
-            {actions.map((action, index) => (
-              <Button
-                disabled={action.disabled}
-                key={index}
-                onClick={action.onClick}
-                size="sm"
-                variant={action.variant || "default"}
-              >
-                {action.label}
-              </Button>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
-);
-
-BulkActions.displayName = "BulkActions";

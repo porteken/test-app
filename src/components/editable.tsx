@@ -19,7 +19,6 @@ import {
   CellRenderer,
   ColumnConfig,
   DeleteDialog,
-  formatDateForInput, // Restored this import
   isPersistentId,
   TableEmptyState,
   TableErrorState,
@@ -32,7 +31,7 @@ interface EditableTableProperties<T extends { id: number | string }> {
   apiBaseUrl: string;
   columns: ColumnConfig<T>[];
 }
-
+const current_date = new Date().toISOString().split("T")[0];
 // -------------------- Component --------------------
 export function EditableTable<T extends { id: number | string }>({
   apiBaseUrl,
@@ -193,9 +192,7 @@ export function EditableTable<T extends { id: number | string }>({
       if (col.type === "checkbox") {
         (newRow as Record<keyof T, unknown>)[key] = false as T[keyof T];
       } else if (col.type === "date") {
-        (newRow as Record<keyof T, unknown>)[key] = formatDateForInput(
-          new Date()
-        ) as T[keyof T];
+        (newRow as Record<keyof T, unknown>)[key] = current_date as T[keyof T];
       } else {
         (newRow as Record<keyof T, unknown>)[key] = "" as T[keyof T];
       }
@@ -297,7 +294,6 @@ export function EditableTable<T extends { id: number | string }>({
                             col={col}
                             errorMessage={errorMessage}
                             isEditing={isEditing}
-                            row={row}
                             saving={saving}
                             updateEditedRow={updateEditedRow}
                             value={value}
