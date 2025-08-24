@@ -285,7 +285,7 @@ describe("cellRenderer", () => {
           isEditing={true}
           saving={false}
           updateEditedRow={(_, newValue) => setValue(String(newValue))}
-          value={value}
+          value={value === null ? "null" : value}
         />
       );
     }
@@ -305,7 +305,7 @@ describe("cellRenderer", () => {
           isEditing={true}
           saving={false}
           updateEditedRow={(_, newValue) => setValue(String(newValue))}
-          value={value}
+          value={value === null ? "null" : value}
         />
       );
     }
@@ -396,31 +396,12 @@ describe("cellRenderer", () => {
           isEditing={false}
           saving={false}
           updateEditedRow={(_, newValue) => setValue(String(newValue))}
-          value={value}
+          value={value === null ? "null" : value}
         />
       );
     }
     const screen = render(<Wrapper />);
     expect(screen.getByText("Normal Value")).toBeInTheDocument();
-  });
-  it("render null value", () => {
-    // Simulate controlled value with React state
-    function Wrapper() {
-      const [value, setValue] = React.useState<null | string>(null);
-      type RowType = { id: number; status: string };
-      return (
-        <CellRendererComponent<RowType>
-          col={{ key: "status", label: "Status", type: "text" }}
-          errorMessage="This field is required"
-          isEditing={false}
-          saving={false}
-          updateEditedRow={(_, newValue) => setValue(String(newValue))}
-          value={value}
-        />
-      );
-    }
-    const screen = render(<Wrapper />);
-    expect(screen.getByText("null")).toHaveClass("text-muted-foreground");
   });
 
   it("handleSelectChange calls updateEditedRow with correct parameters", () => {

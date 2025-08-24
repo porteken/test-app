@@ -337,9 +337,7 @@ export function CellRendererComponent<T extends { id: RowId }>({
     return <Checkbox aria-label={col.label} checked={!!value} disabled />;
   }
 
-  return (
-    <span className={value ? "" : "text-muted-foreground"}>{displayValue}</span>
-  );
+  return <span>{displayValue}</span>;
 }
 
 export const CellRenderer = React.memo(
