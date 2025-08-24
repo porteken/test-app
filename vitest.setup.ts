@@ -11,3 +11,6 @@ if (!Element.prototype.hasPointerCapture) {
 if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = function() {};
 }
+
+// Mock window.alert
+window.alert = vi.fn();

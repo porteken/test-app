@@ -240,9 +240,6 @@ export function TablePagination<T extends { id: string }>({
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
       const deleteEndpoint = apiConfig.endpoints.delete;
-      if (!deleteEndpoint) {
-        throw new Error("Delete endpoint is not configured in apiConfig.");
-      }
       const url = `${apiConfig.baseUrl}${deleteEndpoint}/${id}`;
       const response = await fetch(url, { method: "DELETE" });
 
@@ -295,7 +292,7 @@ export function TablePagination<T extends { id: string }>({
     (key: string, value: Entity | null) => {
       setFilters(previous => ({
         ...previous,
-        [key]: { search: value?.name ?? "", selected: value },
+        [key]: { search: String(value?.name), selected: value },
       }));
       resetPage();
     },
@@ -415,29 +412,18 @@ export function TablePagination<T extends { id: string }>({
                   ))}
                 </TableHeader>
                 <TableBody>
-                  {table.getRowModel().rows?.length ? (
-                    table.getRowModel().rows.map(row => (
-                      <TableRow data-state={row.getIsSelected()} key={row.id}>
-                        {row.getVisibleCells().map(cell => (
-                          <TableCell key={cell.id}>
-                            {flexRender(
-                              cell.column.columnDef.cell,
-                              cell.getContext()
-                            )}
-                          </TableCell>
-                        ))}
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell
-                        className="h-24 text-center"
-                        colSpan={finalColumns.length}
-                      >
-                        No results.
-                      </TableCell>
+                  {table.getRowModel().rows.map(row => (
+                    <TableRow data-state={row.getIsSelected()} key={row.id}>
+                      {row.getVisibleCells().map(cell => (
+                        <TableCell key={cell.id}>
+                          {flexRender(
+                            cell.column.columnDef.cell,
+                            cell.getContext()
+                          )}
+                        </TableCell>
+                      ))}
                     </TableRow>
-                  )}
+                  ))}
                 </TableBody>
               </Table>
             </div>

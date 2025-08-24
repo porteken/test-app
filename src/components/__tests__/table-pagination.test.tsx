@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,7 +9,12 @@ import {
   generatePaginationRange,
   TablePagination,
 } from "../table-pagination";
-
+vi.mock("@tanstack/react-query", async () => {
+  const actual = await import("@tanstack/react-query");
+  return {
+    ...actual, // Return all the original exports
+  };
+});
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -126,18 +131,19 @@ describe("TablePagination", () => {
     );
     expect(screen.getByText("Select User")).toBeInTheDocument();
     expect(screen.getByRole("combobox")).toBeInTheDocument();
+    const user = userEvent.setup();
     const select = screen.getByRole("combobox");
-    fireEvent.click(select);
+    await user.click(select);
     await waitFor(() => {
       expect(screen.getByText("Jimmy_Nutron")).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText("Jimmy_Nutron"));
+    await user.click(screen.getByText("Jimmy_Nutron"));
     await waitFor(() => {
       expect(globalThis.fetch).toHaveBeenCalledWith(
         expect.stringContaining("user_name=Jimmy_Nutron")
       );
     });
-    fireEvent.click(screen.getByLabelText("Clear all filters"));
+    await user.click(screen.getByLabelText("Clear all filters"));
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.stringContaining("page=1")
     );
@@ -331,6 +337,7 @@ describe("TablePagination", () => {
     const user = userEvent.setup();
     const nextButton = screen.getByLabelText("Go to next page");
     await user.click(nextButton);
+
     await waitFor(() => {
       expect(globalThis.fetch).toHaveBeenCalledWith(
         expect.stringContaining("page=2")
@@ -417,7 +424,10 @@ describe("TablePagination", () => {
 
     vi.mocked(globalThis.fetch).mockImplementation((url, options) => {
       const urlObject = new URL(url.toString(), "http://localhost");
-      if (urlObject.pathname === MOCK_API_CONFIG.endpoints.data && options?.method !== 'DELETE') {
+      if (
+        urlObject.pathname === MOCK_API_CONFIG.endpoints.data &&
+        options?.method !== "DELETE"
+      ) {
         return Promise.resolve({
           json: () => Promise.resolve(mockResponse),
           ok: true,
@@ -469,6 +479,207 @@ describe("TablePagination", () => {
         { method: "DELETE" }
       );
     });
+  });
+  it("should handle Delete with close", async () => {
+    const mockResponse = {
+      data: [{ id: 1, user_name: "John Doe" }],
+      page: 1,
+      pageSize: 50,
+      total: 1,
+    };
+
+    vi.mocked(globalThis.fetch).mockImplementation((url, options) => {
+      const urlObject = new URL(url.toString(), "http://localhost");
+      if (
+        urlObject.pathname === MOCK_API_CONFIG.endpoints.data &&
+        options?.method !== "DELETE"
+      ) {
+        return Promise.resolve({
+          json: () => Promise.resolve(mockResponse),
+          ok: true,
+        } as Response);
+      }
+      if (
+        urlObject.pathname.startsWith(MOCK_API_CONFIG.endpoints.delete) &&
+        options?.method === "DELETE"
+      ) {
+        return Promise.resolve({
+          json: () => Promise.resolve({}), // Empty successful response
+          ok: true,
+        } as Response);
+      }
+      if (urlObject.pathname === MOCK_API_CONFIG.endpoints.filters) {
+        return Promise.resolve({
+          json: () => Promise.resolve({ data: [] }),
+          ok: true,
+        } as Response);
+      }
+      return Promise.reject(new Error(`Unhandled API call to ${url}`));
+    });
+
+    const user = userEvent.setup();
+    setup(
+      <TablePagination
+        apiConfig={MOCK_API_CONFIG}
+        columnConfigs={MOCK_COLUMN_CONFIGS}
+        enableDelete={true}
+        pageSize={10}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("John Doe")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByLabelText("Open menu"));
+
+    const deleteButton = await screen.findByText("Delete");
+    await user.click(deleteButton);
+
+    const confirmButton = await screen.findByLabelText("Cancel delete");
+    await user.click(confirmButton);
+
+    await waitFor(async () => {
+      await waitFor(() => {
+        expect(
+          screen.queryByLabelText("Cancel delete")
+        ).not.toBeInTheDocument();
+      });
+    });
+  });
+  it("should handle Delete with error", async () => {
+    const mockResponse = {
+      data: [{ id: 1, user_name: "John Doe" }],
+      page: 1,
+      pageSize: 50,
+      total: 1,
+    };
+
+    vi.mocked(globalThis.fetch).mockImplementation((url, options) => {
+      const urlObject = new URL(url.toString(), "http://localhost");
+      if (
+        urlObject.pathname === MOCK_API_CONFIG.endpoints.data &&
+        options?.method !== "DELETE"
+      ) {
+        return Promise.resolve({
+          json: () => Promise.resolve(mockResponse),
+          ok: true,
+        } as Response);
+      }
+      if (
+        urlObject.pathname.startsWith(MOCK_API_CONFIG.endpoints.delete) &&
+        options?.method === "DELETE"
+      ) {
+        return Promise.resolve({
+          json: () => Promise.resolve({}), // Empty successful response
+          ok: false,
+        } as Response);
+      }
+      if (urlObject.pathname === MOCK_API_CONFIG.endpoints.filters) {
+        return Promise.resolve({
+          json: () => Promise.resolve({ data: [] }),
+          ok: true,
+        } as Response);
+      }
+      return Promise.reject(new Error(`Unhandled API call to ${url}`));
+    });
+
+    const user = userEvent.setup();
+    setup(
+      <TablePagination
+        apiConfig={MOCK_API_CONFIG}
+        columnConfigs={MOCK_COLUMN_CONFIGS}
+        enableDelete={true}
+        pageSize={10}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("John Doe")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByLabelText("Open menu"));
+
+    const deleteButton = await screen.findByText("Delete");
+    await user.click(deleteButton);
+
+    const confirmButton = await screen.findByLabelText("Confirm delete");
+    await user.click(confirmButton);
+
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        `${MOCK_API_CONFIG.baseUrl}${MOCK_API_CONFIG.endpoints.delete}/1`,
+        { method: "DELETE" }
+      );
+    });
+    expect(globalThis.fetch).toThrowError();
+  });
+  it("should handle Delete with missing endpoint", async () => {
+    const mockResponse = {
+      data: [{ id: 1, user_name: "John Doe" }],
+      page: 1,
+      pageSize: 50,
+      total: 1,
+    };
+
+    vi.mocked(globalThis.fetch).mockImplementation((url, options) => {
+      const urlObject = new URL(url.toString(), "http://localhost");
+      if (
+        urlObject.pathname === MOCK_API_CONFIG.endpoints.data &&
+        options?.method !== "DELETE"
+      ) {
+        return Promise.resolve({
+          json: () => Promise.resolve(mockResponse),
+          ok: true,
+        } as Response);
+      }
+      if (
+        urlObject.pathname.startsWith(MOCK_API_CONFIG.endpoints.delete) &&
+        options?.method === "DELETE"
+      ) {
+        return Promise.resolve({
+          json: () => Promise.resolve({}), // Empty successful response
+          ok: false,
+        } as Response);
+      }
+      if (urlObject.pathname === MOCK_API_CONFIG.endpoints.filters) {
+        return Promise.resolve({
+          json: () => Promise.resolve({ data: [] }),
+          ok: true,
+        } as Response);
+      }
+      return Promise.reject(new Error(`Unhandled API call to ${url}`));
+    });
+
+    const user = userEvent.setup();
+    setup(
+      <TablePagination
+        apiConfig={MOCK_API_CONFIG}
+        columnConfigs={MOCK_COLUMN_CONFIGS}
+        enableDelete={true}
+        pageSize={10}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("John Doe")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByLabelText("Open menu"));
+
+    const deleteButton = await screen.findByText("Delete");
+    await user.click(deleteButton);
+
+    const confirmButton = await screen.findByLabelText("Confirm delete");
+    await user.click(confirmButton);
+
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        `${MOCK_API_CONFIG.baseUrl}${MOCK_API_CONFIG.endpoints.delete}/1`,
+        { method: "DELETE" }
+      );
+    });
+    expect(globalThis.fetch).toThrowError();
   });
 });
 describe("generatePaginationRange", () => {
@@ -549,5 +760,23 @@ describe("fetchTableData", () => {
     await expect(
       fetchTableData({ search: "John" }, 1, 50, MOCK_API_CONFIG)
     ).rejects.toThrow("error");
+  });
+});
+describe("tanstack query", () => {
+  it("should render error state", async () => {
+    const actual = await import("@tanstack/react-query");
+    actual.useQuery = vi.fn().mockReturnValue({
+      isError: true,
+    });
+    setup(
+      <TablePagination
+        apiConfig={MOCK_API_CONFIG}
+        columnConfigs={MOCK_COLUMN_CONFIGS}
+        enableDelete={true}
+        pageSize={10}
+      />
+    );
+
+    expect(screen.getByText("An unknown error occurred")).toBeInTheDocument();
   });
 });

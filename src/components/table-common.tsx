@@ -379,7 +379,12 @@ export const DeleteDialog = React.memo<DeleteDialogProperties>(
             <DialogDescription>{description}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button disabled={isDeleting} onClick={onClose} variant="outline">
+            <Button
+              aria-label="Cancel delete"
+              disabled={isDeleting}
+              onClick={onClose}
+              variant="outline"
+            >
               {cancelText}
             </Button>
             <Button

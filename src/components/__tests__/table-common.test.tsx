@@ -534,7 +534,7 @@ describe("DeleteDialog", () => {
     render(
       <DeleteDialog {...mockProperties} onConfirm={handleConfirm} open={true} />
     );
-    await user.click(screen.getByRole("button", { name: /delete/i }));
+    await user.click(screen.getByLabelText("Confirm delete"));
     expect(handleConfirm).toHaveBeenCalledTimes(1);
   });
 });
