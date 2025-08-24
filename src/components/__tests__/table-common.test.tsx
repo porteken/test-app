@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ActionButtons,
   CellRendererComponent,
+  ColumnConfig,
   DeleteDialog,
   isPersistentId,
   TableEmptyState,
@@ -382,6 +383,84 @@ describe("cellRenderer", () => {
     const select = screen.getByRole("combobox");
     fireEvent.change(select, { target: { value: "option2" } });
     expect(select).toHaveValue("option2");
+  });
+  it("render normal value", () => {
+    // Simulate controlled value with React state
+    function Wrapper() {
+      const [value, setValue] = React.useState("Normal Value");
+      type RowType = { id: number; status: string };
+      return (
+        <CellRendererComponent<RowType>
+          col={{ key: "status", label: "Status", type: "text" }}
+          errorMessage="This field is required"
+          isEditing={false}
+          saving={false}
+          updateEditedRow={(_, newValue) => setValue(String(newValue))}
+          value={value}
+        />
+      );
+    }
+    const screen = render(<Wrapper />);
+    expect(screen.getByText("Normal Value")).toBeInTheDocument();
+  });
+  it("render null value", () => {
+    // Simulate controlled value with React state
+    function Wrapper() {
+      const [value, setValue] = React.useState<null | string>(null);
+      type RowType = { id: number; status: string };
+      return (
+        <CellRendererComponent<RowType>
+          col={{ key: "status", label: "Status", type: "text" }}
+          errorMessage="This field is required"
+          isEditing={false}
+          saving={false}
+          updateEditedRow={(_, newValue) => setValue(String(newValue))}
+          value={value}
+        />
+      );
+    }
+    const screen = render(<Wrapper />);
+    expect(screen.getByText("null")).toHaveClass("text-muted-foreground");
+  });
+
+  it("handleSelectChange calls updateEditedRow with correct parameters", () => {
+    const updateEditedRowMock = vi.fn();
+    type RowType = { id: number; status: string };
+    const col: ColumnConfig<RowType> = {
+      key: "status",
+      label: "Status",
+      options: [
+        { label: "Active", value: "active" },
+        { label: "Inactive", value: "inactive" },
+      ],
+      type: "select",
+    };
+
+    const screen = render(
+      <CellRendererComponent<RowType>
+        col={col}
+        isEditing={true}
+        saving={false}
+        updateEditedRow={updateEditedRowMock}
+        value="active"
+      />
+    );
+
+    // Find the Select component and trigger onValueChange directly
+    // Since Radix UI Select uses a different mechanism, we can test the handler directly
+    // by accessing the component's props or using a different approach
+
+    // Alternative: Test the select by opening it and clicking an option
+    const selectTrigger = screen.getByRole("combobox");
+    fireEvent.click(selectTrigger);
+
+    // Now find and click the option
+    const option = screen.getByText("Inactive");
+    fireEvent.click(option);
+
+    // Verify that updateEditedRow was called with the correct parameters
+    expect(updateEditedRowMock).toHaveBeenCalledWith("status", "inactive");
+    expect(updateEditedRowMock).toHaveBeenCalledTimes(1);
   });
 });
 describe("deleteDialog", () => {
