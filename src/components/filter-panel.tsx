@@ -56,7 +56,6 @@ export type FilterConfig = {
   key: string;
   label: string;
   placeholder: string;
-  required?: boolean;
 };
 
 export type FiltersState = Record<string, Filter>;
@@ -87,6 +86,7 @@ const useDebounce = <T,>(value: T, delay: number): T => {
 /* -------------------- Infinite Select -------------------- */
 
 export type InfiniteSearchableSelectProperties<TData extends Entity> = {
+  config: FilterConfig;
   data: InfiniteData<InfiniteQueryPage<TData>> | undefined;
   disabled?: boolean;
   error?: string;
@@ -97,16 +97,14 @@ export type InfiniteSearchableSelectProperties<TData extends Entity> = {
   isFetchingNextPage: boolean;
   itemToId: (_item: TData) => string;
   itemToName: (_item: TData) => string;
-  label: string;
   onValueChange: (_value: null | TData) => void;
-  placeholder: string;
-  required?: boolean;
   search: string;
   selectedValue: null | TData;
   setSearch: (_search: string) => void;
 };
 
 export function InfiniteSearchableSelect<TData extends Entity>({
+  config,
   data,
   disabled = false,
   error,
@@ -117,10 +115,7 @@ export function InfiniteSearchableSelect<TData extends Entity>({
   isFetchingNextPage,
   itemToId,
   itemToName,
-  label,
   onValueChange,
-  placeholder,
-  required = false,
   search,
   selectedValue,
   setSearch,
@@ -187,16 +182,15 @@ export function InfiniteSearchableSelect<TData extends Entity>({
   const showError = isError || !!error;
   const showEmpty =
     !showError && !hasValidItems && !isFetching && search.length > 0;
+  const comboboxId = React.useMemo(
+    () => `combobox-${config.key}`,
+    [config.key]
+  );
 
   return (
     <div className="flex flex-col gap-2">
-      <label
-        className={`
-          text-sm font-medium
-          ${required ? "after:ml-1 after:text-red-500 after:content-['*']" : ""}
-        `}
-      >
-        {label}
+      <label className={`text-sm font-medium`} htmlFor={comboboxId}>
+        {config.label}
       </label>
 
       <Popover onOpenChange={setOpen} open={open}>
@@ -216,12 +210,13 @@ export function InfiniteSearchableSelect<TData extends Entity>({
               }
             `}
             disabled={disabled}
+            id={comboboxId}
             onKeyDown={handleKeyDown}
             role="combobox"
             variant="outline"
           >
             <span className="truncate">
-              {selectedValue ? itemToName(selectedValue) : placeholder}
+              {selectedValue ? itemToName(selectedValue) : config.placeholder}
             </span>
 
             <div className="ml-2 flex items-center gap-1">
@@ -267,7 +262,7 @@ export function InfiniteSearchableSelect<TData extends Entity>({
                   onValueChange(null);
                 }
               }}
-              placeholder={placeholder}
+              placeholder={config.placeholder}
               value={search}
             />
 
@@ -296,7 +291,11 @@ export function InfiniteSearchableSelect<TData extends Entity>({
               )}
 
               {hasNextPage && (
-                <div className="h-4" ref={intersectionReference} />
+                <div
+                  className="h-4"
+                  data-testid="infinite-scroll-trigger"
+                  ref={intersectionReference}
+                />
               )}
 
               {isFetchingNextPage && (
@@ -325,7 +324,7 @@ const fetchFilterOptions = async (
   signal?: AbortSignal
 ): Promise<InfiniteQueryPage> => {
   const parameters = new URLSearchParams({
-    limit: (apiConfig.defaultLimit || 20).toString(),
+    limit: (apiConfig.defaultLimit || 10).toString(),
     name: fieldName,
     page: pageParameter.toString(),
   });
@@ -470,6 +469,7 @@ const ConfigurableSelect = React.memo(
     selectedValue,
   }: ConfigurableSelectProperties) => (
     <InfiniteSearchableSelect
+      config={config}
       data={data}
       disabled={disabled}
       error={error}
@@ -480,12 +480,9 @@ const ConfigurableSelect = React.memo(
       isFetchingNextPage={isFetchingNextPage}
       itemToId={(item: Entity) => item.id}
       itemToName={(item: Entity) => item.name}
-      label={config.label}
       onValueChange={(value: Entity | null) =>
         onSelectChange(config.key, value)
       }
-      placeholder={config.placeholder}
-      required={config.required}
       search={search}
       selectedValue={selectedValue}
       setSearch={value => onSearchChange(config.key, value)}
@@ -539,7 +536,6 @@ export const FilterPanel = ({
           disabled={disabled}
           onClick={onClearFilters}
           size="sm"
-          variant="ghost"
         >
           Clear All
         </Button>
@@ -568,7 +564,7 @@ export const FilterPanel = ({
               disabled={disabled}
               error={errors[config.key]}
               fetchNextPage={filterQuery.fetchNextPage}
-              hasNextPage={filterQuery.hasNextPage ?? false}
+              hasNextPage={filterQuery.hasNextPage}
               isError={filterQuery.isError}
               isFetching={filterQuery.isFetching}
               isFetchingNextPage={filterQuery.isFetchingNextPage}

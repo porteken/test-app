@@ -1,16 +1,27 @@
-import '@testing-library/jest-dom';
+import "@testing-library/jest-dom";
+import { vi } from "vitest";
 
 // Polyfill for hasPointerCapture
 if (!Element.prototype.hasPointerCapture) {
-  Element.prototype.hasPointerCapture = function(pointerId) {
+  Element.prototype.hasPointerCapture = function (pointerId) {
     return false;
   };
 }
 
 // Polyfill for scrollIntoView
 if (!Element.prototype.scrollIntoView) {
-  Element.prototype.scrollIntoView = function() {};
+  Element.prototype.scrollIntoView = function () {};
 }
 
 // Mock window.alert
-window.alert = vi.fn();
+globalThis.alert = vi.fn();
+
+const intersectionObserverMock = () => ({
+  disconnect: vi.fn(),
+  observe: vi.fn(),
+  unobserve: vi.fn(),
+});
+
+globalThis.IntersectionObserver = vi
+  .fn()
+  .mockImplementation(intersectionObserverMock);

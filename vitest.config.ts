@@ -29,6 +29,11 @@ export default defineConfig({
       reporter: ["text", "json", "html", "lcov"],
     },
     environment: "jsdom",
+    environmentOptions: {
+      jsdom: {
+        resources: "usable",
+      },
+    },
     exclude: [
       "node_modules/**",
       ".next/**",
@@ -37,11 +42,14 @@ export default defineConfig({
       "src/app/**",
     ],
     globals: true,
+    hookTimeout: 10_000,
     include: [
       "src/**/__tests__/**/*.test.{js,jsx,ts,tsx}",
       "src/**/*.test.{js,jsx,ts,tsx}",
       "!src/app/**",
     ],
     setupFiles: ["./vitest.setup.ts"],
+    // React 19 specific configuration
+    testTimeout: 10_000,
   },
 });

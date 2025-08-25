@@ -18,7 +18,7 @@ const productColumnHelper = createColumnHelper<ProductData>();
 
 const apiConfig = {
   baseUrl: process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000",
-  defaultLimit: 20,
+  defaultLimit: 10,
   endpoints: {
     data: "/api/data",
     delete: "/api/data", // ✅ 2. Specify the base path for the DELETE endpoint
@@ -72,7 +72,7 @@ export default function Home() {
         columnConfigs={columnConfigs}
         enableDelete // ✅ 3. Simply add the prop to enable the delete action
         filterConfigs={filterConfigs}
-        pageSize={50}
+        pageSize={20}
       />
     </QueryClientProvider>
   );

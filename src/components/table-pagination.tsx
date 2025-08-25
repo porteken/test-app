@@ -43,6 +43,14 @@ import {
   TableLoadingState,
 } from "./table-common"; // Assuming your new components are in 'table-common.tsx'
 
+export type ApiResponse<T> = {
+  data: T[];
+  limit: number;
+  next?: string;
+  page: number;
+  total: number;
+};
+
 // -------------------- Types --------------------
 export type InfiniteQueryPage<T> = {
   items: T[];
@@ -57,14 +65,6 @@ type ApiConfig = {
     delete?: string; // Endpoint for deletion, e.g., "/api/data"
     filters: string;
   };
-};
-
-type ApiResponse<T> = {
-  data: T[];
-  limit: number;
-  next?: string;
-  page: number;
-  total: number;
 };
 
 type Entity = { id: string; name: string };
@@ -249,7 +249,9 @@ export function TablePagination<T extends { id: string }>({
           errorData.message || `Failed to delete item with ID ${id}`
         );
       }
-      return response.json();
+      // FIX: Do not attempt to parse a JSON body that may not exist.
+      // The success of the operation is determined by `response.ok`.
+      return;
     },
     onError: (error: Error) => {
       console.error("Deletion failed:", error.message);
@@ -457,11 +459,9 @@ export function TablePagination<T extends { id: string }>({
                           <PaginationEllipsis />
                         </PaginationItem>
                       ) : (
-                        <PaginationItem
-                          aria-label={`Go to page ${page}`}
-                          key={page}
-                        >
+                        <PaginationItem key={page}>
                           <PaginationLink
+                            aria-label={`Go to page ${page}`}
                             href="#"
                             isActive={currentPage === page}
                             onClick={event_ => {
