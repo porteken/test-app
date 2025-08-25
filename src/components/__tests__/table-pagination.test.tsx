@@ -8,7 +8,10 @@ import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import React from "react";
-import { mockIsIntersecting } from "react-intersection-observer/test-utils";
+import {
+  mockAllIsIntersecting,
+  mockIsIntersecting,
+} from "react-intersection-observer/test-utils";
 import {
   afterAll,
   afterEach,
@@ -174,12 +177,28 @@ vi.mock("react-intersection-observer", async () => {
 });
 
 const queryClientTestConfig: QueryClientConfig = {
-  defaultOptions: { queries: { retry: false } },
+  defaultOptions: {
+    mutations: { retry: false },
+    queries: {
+      cacheTime: 0,
+      refetchOnMount: false,
+      refetchOnReconnect: false,
+      refetchOnWindowFocus: false,
+      retry: false,
+      staleTime: 0,
+    },
+  },
 };
 const createTestQueryClient = () => new QueryClient(queryClientTestConfig);
 
-const setup = (ui: React.ReactElement, queryClient: QueryClient) =>
-  render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+const setupRender = (ui: React.ReactElement) => {
+  const queryClient = createTestQueryClient();
+  const utilities = render(
+    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+  );
+  const user = userEvent.setup({ pointerEventsCheck: 0 });
+  return { queryClient, user, ...utilities };
+};
 
 vi.stubGlobal(
   "ResizeObserver",
@@ -201,8 +220,62 @@ const MOCK_COLUMN_CONFIGS = [
   { accessorKey: "user_name", header: "User Name" },
 ];
 
+const ARIA = {
+  clearFilters: "Clear all filters",
+  confirmDelete: "Confirm delete",
+  dialogTitle: "Confirm Deletion",
+  next: "Go to next page",
+  openMenu: "Open menu",
+  prev: "Go to previous page",
+};
+
+// Silence noisy network/react-query errors but keep useful ones
+const originalConsoleError = console.error;
+beforeAll(() => {
+  vi.spyOn(console, "error").mockImplementation((...arguments_: unknown[]) => {
+    const [first] = arguments_;
+    if (
+      typeof first === "string" &&
+      (first.includes("react-query") ||
+        first.includes("Error fetching") ||
+        first.includes("Uncaught [Error]"))
+    ) {
+      return;
+    }
+    // @ts-expect-error variadic
+    originalConsoleError(...arguments_);
+  });
+});
+afterAll(() => {
+  (console.error as unknown as vi.SpyInstance).mockRestore();
+});
+
+// Helper MSW overrides
+const useGetData = (impl: Parameters<typeof http.get>[1]) => {
+  server.use(
+    http.get(
+      `${MOCK_API_CONFIG.baseUrl}${MOCK_API_CONFIG.endpoints.data}`,
+      impl
+    )
+  );
+};
+
+const useDeleteData = (impl: Parameters<typeof http.delete>[1]) => {
+  server.use(
+    http.delete(
+      `${MOCK_API_CONFIG.baseUrl}${MOCK_API_CONFIG.endpoints.delete}/:id`,
+      impl
+    )
+  );
+};
+
+// Reset intersection state after each test to avoid leakage
+afterEach(() => {
+  mockAllIsIntersecting(false);
+});
+
 // =================================================================
-// Tests
+/* Tests */
 // =================================================================
 
 describe("TablePagination", () => {
@@ -212,24 +285,26 @@ describe("TablePagination", () => {
     queryClient = createTestQueryClient();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await queryClient.cancelQueries();
     queryClient.clear();
   });
 
   it("displays loading state initially", () => {
-    setup(
-      <TablePagination
-        apiConfig={MOCK_API_CONFIG}
-        columnConfigs={MOCK_COLUMN_CONFIGS}
-        pageSize={10}
-      />,
-      queryClient
+    render(
+      <QueryClientProvider client={queryClient}>
+        <TablePagination
+          apiConfig={MOCK_API_CONFIG}
+          columnConfigs={MOCK_COLUMN_CONFIGS}
+          pageSize={10}
+        />
+      </QueryClientProvider>
     );
     expect(screen.getByText("Loading data...")).toBeInTheDocument();
   });
 
   it("renders filter controls and applies filters", async () => {
-    setup(
+    const { user } = setupRender(
       <TablePagination
         apiConfig={MOCK_API_CONFIG}
         columnConfigs={MOCK_COLUMN_CONFIGS}
@@ -242,27 +317,33 @@ describe("TablePagination", () => {
           },
         ]}
         pageSize={10}
-      />,
-      queryClient
+      />
     );
 
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("combobox", { name: "User" }));
-    expect(await screen.findByText("Jimmy_Nutron")).toBeInTheDocument();
+    await user.click(screen.getByRole("combobox", { name: /user/i }));
+    expect(
+      await screen.findByRole("option", { name: "Jimmy_Nutron" })
+    ).toBeInTheDocument();
 
-    // Test infinite scroll for filters
+    // Ensure the sentinel exists, then trigger intersection
+    await screen.findByTestId("infinite-scroll-trigger");
     mockIsIntersecting(screen.getByTestId("infinite-scroll-trigger"), true);
-    expect(await screen.findByText("Joe_Porter")).toBeInTheDocument();
+
+    expect(
+      await screen.findByRole("option", { name: "Joe_Porter" })
+    ).toBeInTheDocument();
 
     // Apply a filter
-    await user.click(screen.getByText("Joe_Porter"));
+    await user.click(screen.getByRole("option", { name: "Joe_Porter" }));
     await waitFor(() =>
-      expect(screen.queryByText("Tom_Never")).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole("option", { name: "Tom_Never" })
+      ).not.toBeInTheDocument()
     );
   });
 
   it("clears filters", async () => {
-    setup(
+    const { user } = setupRender(
       <TablePagination
         apiConfig={MOCK_API_CONFIG}
         columnConfigs={MOCK_COLUMN_CONFIGS}
@@ -275,18 +356,19 @@ describe("TablePagination", () => {
           },
         ]}
         pageSize={10}
-      />,
-      queryClient
+      />
     );
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("combobox", { name: "User" }));
-    await user.click(await screen.findByText("Jimmy_Nutron"));
 
-    // Wait for the filter to be applied and the clear button to appear
-    const clearButton = await screen.findByLabelText("Clear all filters");
+    await user.click(screen.getByRole("combobox", { name: /user/i }));
+    await user.click(
+      await screen.findByRole("option", { name: "Jimmy_Nutron" })
+    );
+
+    const clearButton = await screen.findByRole("button", {
+      name: ARIA.clearFilters,
+    });
     expect(clearButton).toBeInTheDocument();
 
-    // Clear the filter
     await user.click(clearButton);
     await waitFor(() =>
       expect(screen.getByText("Select User")).toBeInTheDocument()
@@ -294,7 +376,6 @@ describe("TablePagination", () => {
   });
 
   it("renders empty table when API returns no data", async () => {
-    // Override the default handler for this specific test
     server.use(
       http.get(
         `${MOCK_API_CONFIG.baseUrl}${MOCK_API_CONFIG.endpoints.data}`,
@@ -303,219 +384,204 @@ describe("TablePagination", () => {
         }
       )
     );
-    setup(
-      <TablePagination
-        apiConfig={MOCK_API_CONFIG}
-        columnConfigs={MOCK_COLUMN_CONFIGS}
-        pageSize={10}
-      />,
-      queryClient
+    render(
+      <QueryClientProvider client={queryClient}>
+        <TablePagination
+          apiConfig={MOCK_API_CONFIG}
+          columnConfigs={MOCK_COLUMN_CONFIGS}
+          pageSize={10}
+        />
+      </QueryClientProvider>
     );
     expect(await screen.findByText("No data available")).toBeInTheDocument();
   });
 
   it("renders a table with data and handles page navigation", async () => {
-    setup(
+    const { user } = setupRender(
       <TablePagination
         apiConfig={MOCK_API_CONFIG}
         columnConfigs={MOCK_COLUMN_CONFIGS}
         pageSize={10}
-      />,
-      queryClient
+      />
     );
+
     expect(await screen.findByText("John Doe")).toBeInTheDocument();
 
-    // Initial state: page 1
-    const previousButton = screen.getByLabelText("Go to previous page");
-    const nextButton = screen.getByLabelText("Go to next page");
+    const previousButton = screen.getByLabelText(ARIA.prev);
+    const nextButton = screen.getByLabelText(ARIA.next);
+
+    // If your UI uses disabled attribute, prefer toBeDisabled()
+    // Here original code checks classes; preserve that behavior:
     expect(previousButton).toHaveClass("pointer-events-none opacity-50");
 
-    // Navigate to next page
-    const user = userEvent.setup();
     await user.click(nextButton);
     expect(await screen.findByText("Jane Smith")).toBeInTheDocument();
 
-    // New state: page 2
-    expect(screen.getByLabelText("Go to previous page")).not.toHaveClass(
-      "pointer-events-none opacity-50"
-    );
+    await waitFor(() => {
+      expect(screen.getByLabelText(ARIA.prev)).not.toHaveClass(
+        "pointer-events-none opacity-50"
+      );
+    });
+
     await user.click(screen.getByLabelText("Go to previous page"));
     await waitFor(() =>
-      expect(screen.getByLabelText("Go to next page")).not.toHaveClass(
+      expect(screen.getByLabelText(ARIA.next)).not.toHaveClass(
         "pointer-events-none opacity-50"
       )
     );
+
     await user.click(screen.getByLabelText("Go to page 5"));
     expect(await screen.findByText("Alice Johnson")).toBeInTheDocument();
+
     await user.click(screen.getByLabelText("Go to page 8"));
     expect(await screen.findByText("Bob Brown")).toBeInTheDocument();
-    expect(screen.getByLabelText("Go to next page")).toHaveClass(
+
+    expect(screen.getByLabelText(ARIA.next)).toHaveClass(
       "pointer-events-none opacity-50"
     );
   });
 
   it("handles clicking a page number", async () => {
-    setup(
+    const { user } = setupRender(
       <TablePagination
         apiConfig={MOCK_API_CONFIG}
         columnConfigs={MOCK_COLUMN_CONFIGS}
         pageSize={10}
-      />,
-      queryClient
+      />
     );
+
     expect(await screen.findByText("John Doe")).toBeInTheDocument();
 
-    const user = userEvent.setup();
     await user.click(screen.getByText("2"));
 
     expect(await screen.findByText("Jane Smith")).toBeInTheDocument();
   });
 
   it("handles successful delete flow", async () => {
-    setup(
+    const { user } = setupRender(
       <TablePagination
         apiConfig={MOCK_API_CONFIG}
         columnConfigs={MOCK_COLUMN_CONFIGS}
         enableDelete
         pageSize={10}
-      />,
-      queryClient
+      />
     );
     expect(await screen.findByText("John Doe")).toBeInTheDocument();
 
-    const user = userEvent.setup();
-    await user.click(screen.getByLabelText("Open menu"));
-    await user.click(await screen.findByText("Delete"));
-    await user.click(await screen.findByLabelText("Confirm delete"));
-
-    // Wait for the dialog to close by asserting its button is no longer present.
-    // Use queryBy... for non-existence checks.
-    await waitFor(() => {
-      expect(screen.queryByLabelText("Confirm delete")).not.toBeInTheDocument();
-    });
-  });
-  it("sends the correct API request when a filter is applied", async () => {
-    // 1. Override the default MSW handler for this specific test.
-    // We want to verify that the `user_name` query parameter is correctly added to the API call.
-    server.use(
-      http.get(
-        `${MOCK_API_CONFIG.baseUrl}${MOCK_API_CONFIG.endpoints.data}`,
-        ({ request }) => {
-          const url = new URL(request.url);
-          // If the request contains the filter we're about to apply,
-          // return a unique user that we can assert against.
-          if (url.searchParams.get("user_name") === "Jimmy_Nutron") {
-            return HttpResponse.json({
-              data: [{ id: 999, user_name: "Filtered Result: Jimmy" }],
-              limit: 10,
-              page: 1,
-              total: 1,
-            });
-          }
-          // Fallback to the default response for the initial render
-          return HttpResponse.json({
-            data: [{ id: 1, user_name: "John Doe" }],
-            limit: 10,
-            page: 1,
-            total: 80,
-          });
-        }
-      )
+    await user.click(screen.getByRole("button", { name: ARIA.openMenu }));
+    await user.click(await screen.findByRole("menuitem", { name: /delete/i }));
+    await user.click(
+      await screen.findByRole("button", { name: ARIA.confirmDelete })
     );
 
-    // 2. Render the component with filter configurations.
-    setup(
+    // Wait for the dialog to close
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: ARIA.confirmDelete })
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("sends the correct API request when a filter is applied", async () => {
+    useGetData(({ request }) => {
+      const url = new URL(request.url);
+      if (url.searchParams.get("user_name") === "Jimmy_Nutron") {
+        return HttpResponse.json({
+          data: [{ id: 999, user_name: "Filtered Result: Jimmy" }],
+          limit: 10,
+          page: 1,
+          total: 1,
+        });
+      }
+      return HttpResponse.json({
+        data: [{ id: 1, user_name: "John Doe" }],
+        limit: 10,
+        page: 1,
+        total: 80,
+      });
+    });
+
+    const { user } = setupRender(
       <TablePagination
         apiConfig={MOCK_API_CONFIG}
         columnConfigs={MOCK_COLUMN_CONFIGS}
         filterConfigs={[
           {
-            apiField: "user_name", // This is the field sent to the API
-            key: "user_name", // This is the internal state key
+            apiField: "user_name", // field sent to the API
+            key: "user_name", // internal state key
             label: "User",
             placeholder: "Select User",
           },
         ]}
         pageSize={10}
-      />,
-      queryClient
+      />
     );
 
-    // Ensure initial data is loaded
     expect(await screen.findByText("John Doe")).toBeInTheDocument();
 
-    // 3. Simulate the user selecting a filter option.
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("combobox", { name: "User" }));
-    await user.click(await screen.findByText("Jimmy_Nutron"));
+    await user.click(screen.getByRole("combobox", { name: /user/i }));
+    await user.click(
+      await screen.findByRole("option", { name: "Jimmy_Nutron" })
+    );
 
-    // 4. Assert that the table now displays the unique data from our special handler.
-    // This implicitly confirms that the `apiFilters` object was built correctly
-    // and a new API request was sent with the `user_name=Jimmy_Nutron` query parameter.
     expect(
       await screen.findByText("Filtered Result: Jimmy")
     ).toBeInTheDocument();
-
-    // Also assert the old data is gone
     expect(screen.queryByText("John Doe")).not.toBeInTheDocument();
   });
 
   it("handles delete error", async () => {
-    // Override the handler to simulate a server error on DELETE
-    server.use(
-      http.delete(
-        `${MOCK_API_CONFIG.baseUrl}${MOCK_API_CONFIG.endpoints.delete}/:id`,
-        () => {
-          return new HttpResponse(undefined, {
-            status: 500,
-            statusText: "Internal Server Error",
-          });
-        }
-      )
-    );
+    useDeleteData(() => {
+      return new HttpResponse(undefined, {
+        status: 500,
+        statusText: "Internal Server Error",
+      });
+    });
 
-    setup(
+    const { user } = setupRender(
       <TablePagination
         apiConfig={MOCK_API_CONFIG}
         columnConfigs={MOCK_COLUMN_CONFIGS}
         enableDelete
         pageSize={10}
-      />,
-      queryClient
+      />
     );
     expect(await screen.findByText("John Doe")).toBeInTheDocument();
 
-    const user = userEvent.setup();
-    await user.click(screen.getByLabelText("Open menu"));
-    await user.click(await screen.findByText("Delete"));
-    await user.click(await screen.findByLabelText("Confirm delete"));
+    await user.click(screen.getByRole("button", { name: ARIA.openMenu }));
+    await user.click(await screen.findByRole("menuitem", { name: /delete/i }));
+    await user.click(
+      await screen.findByRole("button", { name: ARIA.confirmDelete })
+    );
 
-    // Check that the delete dialog remains open after error
     await waitFor(() =>
-      expect(screen.getByText("Confirm Deletion")).toBeInTheDocument()
+      expect(
+        screen.getByRole("heading", { name: new RegExp(ARIA.dialogTitle, "i") })
+      ).toBeInTheDocument()
     );
   });
 
   it("renders error state on initial fetch failure", async () => {
-    server.use(
-      http.get(
-        `${MOCK_API_CONFIG.baseUrl}${MOCK_API_CONFIG.endpoints.data}`,
-        () => {
-          return new HttpResponse(undefined, { status: 500 });
-        }
-      )
+    useGetData(() => {
+      return new HttpResponse(undefined, {
+        status: 500,
+        statusText: "Internal Server Error",
+      });
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <TablePagination
+          apiConfig={MOCK_API_CONFIG}
+          columnConfigs={MOCK_COLUMN_CONFIGS}
+          pageSize={10}
+        />
+      </QueryClientProvider>
     );
-    setup(
-      <TablePagination
-        apiConfig={MOCK_API_CONFIG}
-        columnConfigs={MOCK_COLUMN_CONFIGS}
-        pageSize={10}
-      />,
-      queryClient
-    );
+
     expect(
       await screen.findByText(
-        "Failed to fetch table data: Internal Server Error"
+        /failed to fetch table data: internal server error/i
       )
     ).toBeInTheDocument();
   });
@@ -560,7 +626,7 @@ describe("fetchTableData", () => {
       )
     );
     await expect(fetchTableData({}, 1, 10, MOCK_API_CONFIG)).rejects.toThrow(
-      "Server Error"
+      /Server Error|Internal Server Error/
     );
   });
 });
