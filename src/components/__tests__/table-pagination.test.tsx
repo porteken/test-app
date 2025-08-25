@@ -3,7 +3,7 @@ import {
   type QueryClientConfig,
   QueryClientProvider,
 } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -303,7 +303,7 @@ describe("TablePagination", () => {
     expect(screen.getByText("Loading data...")).toBeInTheDocument();
   });
 
-  it("renders filter controls and applies filters", async () => {
+  it("applies filters with select", async () => {
     const { user } = setupRender(
       <TablePagination
         apiConfig={MOCK_API_CONFIG}
@@ -341,8 +341,61 @@ describe("TablePagination", () => {
       ).not.toBeInTheDocument()
     );
   });
+  it("applies filters with typing", async () => {
+    const { user } = setupRender(
+      <TablePagination
+        apiConfig={MOCK_API_CONFIG}
+        columnConfigs={MOCK_COLUMN_CONFIGS}
+        filterConfigs={[
+          {
+            apiField: "user_name",
+            key: "user_name",
+            label: "User",
+            placeholder: "Select User",
+          },
+        ]}
+        pageSize={10}
+      />
+    );
 
-  it("clears filters", async () => {
+    await user.click(screen.getByRole("combobox", { name: /user/i }));
+    expect(await screen.findByLabelText("Search options")).toBeInTheDocument();
+
+    // Apply a filter
+    await user.type(screen.getByLabelText("Search options"), "J");
+    await waitFor(async () =>
+      expect(screen.queryByText("Lisa_Simpson")).toBeNull()
+    );
+    await user.type(screen.getByLabelText("Search options"), "J{enter}");
+    await waitFor(async () =>
+      expect(screen.queryByText("Jane_Smith")).toBeNull()
+    );
+  });
+  it("applies filters with blank typing", async () => {
+    const { user } = setupRender(
+      <TablePagination
+        apiConfig={MOCK_API_CONFIG}
+        columnConfigs={MOCK_COLUMN_CONFIGS}
+        filterConfigs={[
+          {
+            apiField: "user_name",
+            key: "user_name",
+            label: "User",
+            placeholder: "Select User",
+          },
+        ]}
+        pageSize={10}
+      />
+    );
+
+    await user.click(screen.getByRole("combobox", { name: /user/i }));
+    expect(await screen.findByLabelText("Search options")).toBeInTheDocument();
+
+    // Apply a filter
+    await user.type(screen.getByLabelText("Search options"), "{escape}");
+  });
+
+  it("clears filters with button press", async () => {
     const { user } = setupRender(
       <TablePagination
         apiConfig={MOCK_API_CONFIG}
@@ -368,6 +421,36 @@ describe("TablePagination", () => {
       name: ARIA.clearFilters,
     });
     expect(clearButton).toBeInTheDocument();
+
+    await user.click(clearButton);
+    await waitFor(() =>
+      expect(screen.getByText("Select User")).toBeInTheDocument()
+    );
+  });
+
+  it("clears filters with x", async () => {
+    const { user } = setupRender(
+      <TablePagination
+        apiConfig={MOCK_API_CONFIG}
+        columnConfigs={MOCK_COLUMN_CONFIGS}
+        filterConfigs={[
+          {
+            apiField: "user_name",
+            key: "user_name",
+            label: "User",
+            placeholder: "Select User",
+          },
+        ]}
+        pageSize={10}
+      />
+    );
+
+    await user.click(screen.getByRole("combobox", { name: /user/i }));
+    await user.click(
+      await screen.findByRole("option", { name: "Jimmy_Nutron" })
+    );
+
+    const clearButton = screen.getByLabelText("Clear filter for User");
 
     await user.click(clearButton);
     await waitFor(() =>

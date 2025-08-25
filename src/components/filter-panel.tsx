@@ -222,18 +222,13 @@ export function InfiniteSearchableSelect<TData extends Entity>({
             <div className="ml-2 flex items-center gap-1">
               {selectedValue && !disabled && (
                 <span
+                  aria-label={`Clear filter for ${config.label}`}
                   className={`
                     flex h-4 w-4 cursor-pointer items-center justify-center
                     rounded p-0
                     hover:bg-gray-100
                   `}
                   onClick={handleClear}
-                  onKeyDown={event_ => {
-                    if (event_.key === "Enter" || event_.key === " ") {
-                      event_.preventDefault();
-                      handleClear(event_);
-                    }
-                  }}
                   role="button"
                   tabIndex={0}
                 >
@@ -256,11 +251,9 @@ export function InfiniteSearchableSelect<TData extends Entity>({
         >
           <Command shouldFilter={false}>
             <CommandInput
+              aria-label="Search options"
               onValueChange={value => {
                 setSearch(value);
-                if (value === "") {
-                  onValueChange(null);
-                }
               }}
               placeholder={config.placeholder}
               value={search}

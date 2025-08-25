@@ -294,7 +294,7 @@ export function TablePagination<T extends { id: string }>({
     (key: string, value: Entity | null) => {
       setFilters(previous => ({
         ...previous,
-        [key]: { search: String(value?.name), selected: value },
+        [key]: { search: value?.name ?? "", selected: value },
       }));
       resetPage();
     },
