@@ -42,7 +42,7 @@ const MOCK_API_CONFIG = {
   },
 };
 
-const mockFiltersPage1: ApiResponse = {
+const mockFiltersPage1: ApiResponse<string> = {
   data: [
     "Jimmy_Nutron",
     "Jane_Smith",
@@ -245,7 +245,7 @@ beforeAll(() => {
   });
 });
 afterAll(() => {
-  (console.error as unknown as vi.SpyInstance).mockRestore();
+  (console.error as unknown as vi.MockInstance).mockRestore();
 });
 
 // Helper MSW overrides
@@ -318,7 +318,7 @@ describe("TablePagination", () => {
       />
     );
 
-    await user.click(screen.getByRole("combobox", { name: /user/i }));
+    await user.click(screen.getByRole("button", { name: /user/i }));
     expect(
       await screen.findByRole("option", { name: "Jimmy_Nutron" })
     ).toBeInTheDocument();
@@ -356,7 +356,7 @@ describe("TablePagination", () => {
       />
     );
 
-    await user.click(screen.getByRole("combobox", { name: /user/i }));
+    await user.click(screen.getByRole("button", { name: /user/i }));
     expect(await screen.findByLabelText("Search options")).toBeInTheDocument();
 
     // Apply a filter
@@ -386,7 +386,7 @@ describe("TablePagination", () => {
       />
     );
 
-    await user.click(screen.getByRole("combobox", { name: /user/i }));
+    await user.click(screen.getByRole("button", { name: /user/i }));
     expect(await screen.findByLabelText("Search options")).toBeInTheDocument();
 
     // Apply a filter
@@ -410,7 +410,7 @@ describe("TablePagination", () => {
       />
     );
 
-    await user.click(screen.getByRole("combobox", { name: /user/i }));
+    await user.click(screen.getByRole("button", { name: /user/i }));
     await user.click(
       await screen.findByRole("option", { name: "Jimmy_Nutron" })
     );
@@ -443,7 +443,7 @@ describe("TablePagination", () => {
       />
     );
 
-    await user.click(screen.getByRole("combobox", { name: /user/i }));
+    await user.click(screen.getByRole("button", { name: /user/i }));
     await user.click(
       await screen.findByRole("option", { name: "Jimmy_Nutron" })
     );
@@ -600,7 +600,7 @@ describe("TablePagination", () => {
 
     expect(await screen.findByText("John Doe")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("combobox", { name: /user/i }));
+    await user.click(screen.getByRole("button", { name: /user/i }));
     await user.click(
       await screen.findByRole("option", { name: "Jimmy_Nutron" })
     );
