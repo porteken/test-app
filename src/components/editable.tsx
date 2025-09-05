@@ -36,7 +36,7 @@ const current_date = new Date().toISOString().split("T")[0];
 export function EditableTable<T extends { id: number | string }>({
   apiBaseUrl,
   columns,
-}: EditableTableProperties<T>) {
+}: Readonly<EditableTableProperties<T>>) {
   const [data, setData] = useState<T[]>([]);
   const [editingRowId, setEditingRowId] = useState<null | number | string>(
     null
@@ -188,7 +188,7 @@ export function EditableTable<T extends { id: number | string }>({
 
     // Type-safe initialization of columns
     for (const col of columns) {
-      const key = col.key as keyof T;
+      const key = col.key;
       if (col.type === "checkbox") {
         (newRow as Record<keyof T, unknown>)[key] = false as T[keyof T];
       } else if (col.type === "date") {

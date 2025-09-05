@@ -3,7 +3,7 @@ import {
   type QueryClientConfig,
   QueryClientProvider,
 } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -42,7 +42,7 @@ const MOCK_API_CONFIG = {
   },
 };
 
-const mockFiltersPage1: ApiResponse<string> = {
+const mockFiltersPage1: ApiResponse = {
   data: [
     "Jimmy_Nutron",
     "Jane_Smith",
@@ -180,7 +180,6 @@ const queryClientTestConfig: QueryClientConfig = {
   defaultOptions: {
     mutations: { retry: false },
     queries: {
-      cacheTime: 0,
       refetchOnMount: false,
       refetchOnReconnect: false,
       refetchOnWindowFocus: false,
@@ -242,7 +241,6 @@ beforeAll(() => {
     ) {
       return;
     }
-    // @ts-expect-error variadic
     originalConsoleError(...arguments_);
   });
 });

@@ -109,7 +109,7 @@ describe("CellRendererComponent", () => {
   function ControlledInputWrapper<T extends { id: string }>({
     col,
     initialValue,
-  }: ControlledInputWrapperProperties<T>) {
+  }: Readonly<ControlledInputWrapperProperties<T>>) {
     const [value, setValue] = React.useState(initialValue);
     return (
       <CellRendererComponent<T>

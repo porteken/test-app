@@ -99,6 +99,7 @@ export default tseslint.config([
       "react/jsx-uses-react": "error",
       "react/prop-types": "off",
       "unicorn/better-regex": "warn",
+      "unicorn/no-null": "warn",
     },
   },
   {

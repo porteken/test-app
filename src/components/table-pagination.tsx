@@ -5,6 +5,7 @@ import {
   type ColumnDef,
   flexRender,
   getCoreRowModel,
+  type Row,
   useReactTable,
 } from "@tanstack/react-table";
 import { MoreHorizontal } from "lucide-react";
@@ -203,7 +204,44 @@ const useTableData = <T,>(
   });
 };
 
-// -------------------- Main Component --------------------
+// -------------------- Action Cell Component --------------------
+const ActionCell = <T extends { id: string }>({
+  onDelete,
+  row,
+}: {
+  onDelete: (row: T) => void;
+  row: Row<T>;
+}) => (
+  <DropdownMenu>
+    <DropdownMenuTrigger asChild>
+      <Button aria-label="Open menu" className="h-8 w-8 p-0" variant="ghost">
+        <span className="sr-only">Open menu</span>
+        <MoreHorizontal className="h-4 w-4" />
+      </Button>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="end">
+      <DropdownMenuItem
+        className={`
+          text-red-600
+          focus:bg-red-50 focus:text-red-700
+        `}
+        onClick={() => onDelete(row.original)}
+      >
+        Delete
+      </DropdownMenuItem>
+    </DropdownMenuContent>
+  </DropdownMenu>
+);
+
+// -------------------- Action Column Factory --------------------
+const createActionColumn = <T extends { id: string }>(
+  onDelete: (row: T) => void
+): ColumnDef<T, string> => ({
+  cell: ({ row }) => <ActionCell onDelete={onDelete} row={row} />,
+  header: () => null,
+  id: "actions",
+});
+
 // Enforce that the generic data type `T` must have a string `id`
 export function TablePagination<T extends { id: string }>({
   apiConfig,
@@ -211,7 +249,7 @@ export function TablePagination<T extends { id: string }>({
   enableDelete,
   filterConfigs,
   pageSize = DEFAULT_PAGE_SIZE,
-}: TablePaginationProperties<T>) {
+}: Readonly<TablePaginationProperties<T>>) {
   const [filters, setFilters] = useState<FiltersState>(() =>
     generateInitialState(filterConfigs)
   );
@@ -251,7 +289,6 @@ export function TablePagination<T extends { id: string }>({
       }
       // FIX: Do not attempt to parse a JSON body that may not exist.
       // The success of the operation is determined by `response.ok`.
-      return;
     },
     onError: (error: Error) => {
       console.error("Deletion failed:", error.message);
@@ -321,35 +358,7 @@ export function TablePagination<T extends { id: string }>({
       return columnConfigs;
     }
 
-    const actionColumn: ColumnDef<T, string> = {
-      cell: ({ row }) => (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              aria-label="Open menu"
-              className="h-8 w-8 p-0"
-              variant="ghost"
-            >
-              <span className="sr-only">Open menu</span>
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              className={`
-                text-red-600
-                focus:bg-red-50 focus:text-red-700
-              `}
-              onClick={() => handleOpenDeleteDialog(row.original)}
-            >
-              Delete
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ),
-      header: () => null,
-      id: "actions",
-    };
+    const actionColumn = createActionColumn(handleOpenDeleteDialog);
 
     return [actionColumn, ...columnConfigs];
   }, [columnConfigs, enableDelete, handleOpenDeleteDialog]);
@@ -453,27 +462,30 @@ export function TablePagination<T extends { id: string }>({
                         tabIndex={currentPage === 1 ? -1 : 0}
                       />
                     </PaginationItem>
-                    {paginationRange.map((page, index) =>
-                      typeof page === "string" ? (
-                        <PaginationItem key={`ellipsis-${index}`}>
-                          <PaginationEllipsis />
-                        </PaginationItem>
-                      ) : (
-                        <PaginationItem key={page}>
-                          <PaginationLink
-                            aria-label={`Go to page ${page}`}
-                            href="#"
-                            isActive={currentPage === page}
-                            onClick={event_ => {
-                              event_.preventDefault();
-                              handlePageChange(page);
-                            }}
-                          >
-                            {page}
-                          </PaginationLink>
-                        </PaginationItem>
-                      )
-                    )}
+                    {(() => {
+                      let ellipsisCount = 0;
+                      return paginationRange.map(page =>
+                        typeof page === "string" ? (
+                          <PaginationItem key={`ellipsis-${ellipsisCount++}`}>
+                            <PaginationEllipsis />
+                          </PaginationItem>
+                        ) : (
+                          <PaginationItem key={page}>
+                            <PaginationLink
+                              aria-label={`Go to page ${page}`}
+                              href="#"
+                              isActive={currentPage === page}
+                              onClick={event_ => {
+                                event_.preventDefault();
+                                handlePageChange(page);
+                              }}
+                            >
+                              {page}
+                            </PaginationLink>
+                          </PaginationItem>
+                        )
+                      );
+                    })()}
                     <PaginationItem>
                       <PaginationNext
                         aria-disabled={currentPage === totalPages}

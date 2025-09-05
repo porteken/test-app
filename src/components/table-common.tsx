@@ -76,7 +76,7 @@ export const ActionButtons = React.memo<ActionButtonsProperties>(
 
     if (isEditing) {
       return (
-        <div aria-label="Edit actions" className="flex gap-2" role="group">
+        <div aria-label="Edit actions" className="flex gap-2">
           <Button
             aria-label="Cancel editing"
             className="h-8 w-8"
@@ -112,7 +112,7 @@ export const ActionButtons = React.memo<ActionButtonsProperties>(
     }
 
     return (
-      <div aria-label="Row actions" className="flex gap-2" role="group">
+      <div aria-label="Row actions" className="flex gap-2">
         {canEdit && (
           <Button
             aria-label="Edit row"
@@ -157,6 +157,158 @@ interface CellRendererProperties<T extends { id: RowId }> {
   value: T[keyof T];
 }
 
+// Helper functions to reduce complexity
+const getDisplayValue = <T extends { id: RowId }>(
+  value: T[keyof T],
+  colType?: string
+): string => {
+  if (
+    colType === "date" &&
+    (value instanceof Date || typeof value === "string")
+  ) {
+    if (typeof value === "string") {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        return "Invalid Date";
+      }
+      const [year, month, day] = value.split("-").map(Number);
+      const localDate = new Date(year, month - 1, day);
+      return new Intl.DateTimeFormat(undefined, {
+        day: "numeric",
+        month: "numeric",
+        year: "numeric",
+      }).format(localDate);
+    }
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      return new Intl.DateTimeFormat(undefined, {
+        day: "numeric",
+        month: "numeric",
+        year: "numeric",
+      }).format(value);
+    }
+  }
+
+  if (colType === "number" && typeof value === "number") {
+    return value.toLocaleString();
+  }
+
+  return String(value);
+};
+
+const getInputType = (colType?: string): string => {
+  switch (colType) {
+    case "date":
+      return "date";
+    case "number":
+      return "number";
+    default:
+      return "text";
+  }
+};
+
+const processInputValue = <T extends { id: RowId }>(
+  newValue: string,
+  colType?: string
+): T[keyof T] => {
+  switch (colType) {
+    case "date":
+      return newValue as T[keyof T];
+    case "number":
+      return Number(newValue) as T[keyof T];
+    default:
+      return newValue as T[keyof T];
+  }
+};
+
+const renderCheckbox = <T extends { id: RowId }>(
+  col: ColumnConfig<T>,
+  value: T[keyof T],
+  isEditing: boolean,
+  saving: boolean,
+  errorMessage?: string,
+  onChange?: (checked: boolean) => void
+) => (
+  <Checkbox
+    aria-describedby={errorMessage ? `${col.key as string}-error` : undefined}
+    aria-label={col.label}
+    checked={!!value}
+    disabled={saving || !isEditing}
+    onCheckedChange={onChange}
+  />
+);
+
+const renderSelect = <T extends { id: RowId }>(
+  col: ColumnConfig<T>,
+  value: T[keyof T],
+  saving: boolean,
+  errorMessage?: string,
+  onChange?: (selectedValue: string) => void
+) => (
+  <div className="space-y-1">
+    <Select
+      aria-label={col.label}
+      disabled={saving}
+      onValueChange={onChange}
+      value={String(value)}
+    >
+      <SelectTrigger
+        aria-describedby={
+          errorMessage ? `${col.key as string}-error` : undefined
+        }
+        className={errorMessage ? "border-destructive" : ""}
+      >
+        <SelectValue placeholder={col.placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        {col.options?.map(opt => (
+          <SelectItem key={opt.value} value={opt.value}>
+            {opt.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+    {errorMessage && (
+      <p
+        className="text-sm text-destructive"
+        id={`${col.key as string}-error`}
+        role="alert"
+      >
+        {errorMessage}
+      </p>
+    )}
+  </div>
+);
+
+const renderInput = <T extends { id: RowId }>(
+  col: ColumnConfig<T>,
+  value: T[keyof T],
+  saving: boolean,
+  errorMessage?: string,
+  onChange?: (event_: React.ChangeEvent<HTMLInputElement>) => void
+) => (
+  <div className="space-y-1">
+    <Input
+      aria-describedby={errorMessage ? `${col.key as string}-error` : undefined}
+      aria-invalid={!!errorMessage}
+      aria-label={col.label}
+      className={errorMessage ? "border-destructive" : ""}
+      disabled={saving}
+      onChange={onChange}
+      placeholder={col.placeholder}
+      type={getInputType(col.type)}
+      value={String(value)}
+    />
+    {errorMessage && (
+      <p
+        className="text-sm text-destructive"
+        id={`${col.key as string}-error`}
+        role="alert"
+      >
+        {errorMessage}
+      </p>
+    )}
+  </div>
+);
+
 export function CellRendererComponent<T extends { id: RowId }>({
   col,
   errorMessage,
@@ -164,61 +316,17 @@ export function CellRendererComponent<T extends { id: RowId }>({
   saving,
   updateEditedRow,
   value,
-}: CellRendererProperties<T>) {
+}: Readonly<CellRendererProperties<T>>) {
   const isCheckbox = col.type === "checkbox" || typeof value === "boolean";
 
-  const displayValue = useMemo(() => {
-    if (
-      col.type === "date" &&
-      (value instanceof Date || typeof value === "string")
-    ) {
-      if (typeof value === "string") {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-          return "Invalid Date";
-        }
-
-        const [year, month, day] = value.split("-").map(Number);
-        const localDate = new Date(year, month - 1, day);
-
-        return new Intl.DateTimeFormat(undefined, {
-          day: "numeric",
-          month: "numeric",
-          year: "numeric",
-        }).format(localDate);
-      }
-
-      if (value instanceof Date && !Number.isNaN(value.getTime())) {
-        return new Intl.DateTimeFormat(undefined, {
-          day: "numeric",
-          month: "numeric",
-          year: "numeric",
-        }).format(value);
-      }
-    }
-
-    if (col.type === "number" && typeof value === "number") {
-      return value.toLocaleString();
-    }
-
-    return String(value);
-  }, [value, col.type]);
+  const displayValue = useMemo(
+    () => getDisplayValue(value, col.type),
+    [value, col.type]
+  );
 
   const handleInputChange = useCallback(
     (newValue: string) => {
-      let processedValue: T[keyof T];
-      switch (col.type) {
-        case "date": {
-          processedValue = newValue as T[keyof T];
-          break;
-        }
-        case "number": {
-          processedValue = Number(newValue) as T[keyof T];
-          break;
-        }
-        default: {
-          processedValue = newValue as T[keyof T];
-        }
-      }
+      const processedValue = processInputValue<T>(newValue, col.type);
       updateEditedRow(col.key, processedValue);
     },
     [col.key, col.type, updateEditedRow]
@@ -240,101 +348,27 @@ export function CellRendererComponent<T extends { id: RowId }>({
 
   if (isEditing) {
     if (isCheckbox) {
-      return (
-        <Checkbox
-          aria-describedby={
-            errorMessage ? `${col.key as string}-error` : undefined
-          }
-          aria-label={col.label}
-          checked={!!value}
-          disabled={saving}
-          onCheckedChange={handleCheckboxChange}
-        />
+      return renderCheckbox(
+        col,
+        value,
+        isEditing,
+        saving,
+        errorMessage,
+        handleCheckboxChange
       );
     }
 
     if (col.type === "select" && col.options) {
-      return (
-        <div className="space-y-1">
-          <Select
-            aria-label={col.label}
-            disabled={saving}
-            onValueChange={handleSelectChange}
-            value={String(value)}
-          >
-            <SelectTrigger
-              aria-describedby={
-                errorMessage ? `${col.key as string}-error` : undefined
-              }
-              className={errorMessage ? "border-destructive" : ""}
-            >
-              <SelectValue placeholder={col.placeholder} />
-            </SelectTrigger>
-            <SelectContent>
-              {col.options.map(opt => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {errorMessage && (
-            <p
-              className="text-sm text-destructive"
-              id={`${col.key as string}-error`}
-              role="alert"
-            >
-              {errorMessage}
-            </p>
-          )}
-        </div>
-      );
+      return renderSelect(col, value, saving, errorMessage, handleSelectChange);
     }
 
-    let inputType: string;
-    switch (col.type) {
-      case "date": {
-        inputType = "date";
-        break;
-      }
-      case "number": {
-        inputType = "number";
-        break;
-      }
-      default: {
-        inputType = "text";
-      }
-    }
-    return (
-      <div className="space-y-1">
-        <Input
-          aria-describedby={
-            errorMessage ? `${col.key as string}-error` : undefined
-          }
-          aria-invalid={!!errorMessage}
-          aria-label={col.label}
-          className={errorMessage ? "border-destructive" : ""}
-          disabled={saving}
-          onChange={event_ => handleInputChange(event_.target.value)}
-          placeholder={col.placeholder}
-          type={inputType}
-          value={String(value)}
-        />
-        {errorMessage && (
-          <p
-            className="text-sm text-destructive"
-            id={`${col.key as string}-error`}
-            role="alert"
-          >
-            {errorMessage}
-          </p>
-        )}
-      </div>
+    return renderInput(col, value, saving, errorMessage, event_ =>
+      handleInputChange(event_.target.value)
     );
   }
 
   if (isCheckbox) {
-    return <Checkbox aria-label={col.label} checked={!!value} disabled />;
+    return renderCheckbox(col, value, false, true);
   }
 
   return <span>{displayValue}</span>;

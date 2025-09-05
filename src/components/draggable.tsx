@@ -52,7 +52,7 @@ export function DraggableEditableTable<T extends { id: number | string }>({
   apiBaseUrl,
   columns,
   createNewRow,
-}: DraggableEditableTableProperties<T>) {
+}: Readonly<DraggableEditableTableProperties<T>>) {
   const [data, setData] = useState<T[]>([]);
   const [editingRowId, setEditingRowId] = useState<null | number | string>(
     null
@@ -155,43 +155,37 @@ export function DraggableEditableTable<T extends { id: number | string }>({
     setValidationErrors({});
   }, [editedRow]);
 
-  const saveRow = useCallback(async () => {
-    if (!editedRow) {
-      return;
-    }
-
-    // Run validations
+  const validateRow = useCallback((row: T, cols: ColumnConfig<T>[]) => {
     const errors: Record<string, string> = {};
-    for (const col of columns) {
+    for (const col of cols) {
       if (col.validate) {
-        const error = col.validate(editedRow[col.key], editedRow);
+        const error = col.validate(row[col.key], row);
         if (error) {
           errors[col.key as string] = error;
         }
       }
     }
-    if (Object.keys(errors).length > 0) {
-      setValidationErrors(errors);
-      return;
-    }
+    return errors;
+  }, []);
 
-    const isNew = !isPersistentId(editedRow.id);
-    const url = isNew ? apiBaseUrl : `${apiBaseUrl}/${editedRow.id}`;
+  const prepareRequest = useCallback((row: T, baseUrl: string) => {
+    const isNew = !isPersistentId(row.id);
+    const url = isNew ? baseUrl : `${baseUrl}/${row.id}`;
     const method = isNew ? "POST" : "PUT";
-
-    const payload = { ...editedRow };
+    const payload = { ...row };
     if (isNew) {
       delete (payload as { id?: number | string }).id;
     }
+    return { url, method, payload, isNew };
+  }, []);
 
-    try {
-      setSaving(true);
+  const performSave = useCallback(
+    async (url: string, method: string, payload: any) => {
       const response = await fetch(url, {
         body: JSON.stringify(payload),
         headers: { "Content-Type": "application/json" },
         method,
       });
-
       if (!response.ok) {
         const errorBody = await response.json().catch(() => ({}));
         throw new Error(
@@ -199,9 +193,31 @@ export function DraggableEditableTable<T extends { id: number | string }>({
         );
       }
       const saved = await response.json();
+      return saved;
+    },
+    []
+  );
 
+  const saveRow = useCallback(async () => {
+    if (!editedRow) {
+      return;
+    }
+
+    const errors = validateRow(editedRow, columns);
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors);
+      return;
+    }
+
+    const { url, method, payload, isNew } = prepareRequest(
+      editedRow,
+      apiBaseUrl
+    );
+
+    try {
+      setSaving(true);
+      const saved = await performSave(url, method, payload);
       setData(current => current.map(r => (r.id === editedRow.id ? saved : r)));
-
       toast.success(`Record ${isNew ? "created" : "updated"}`);
       setEditingRowId(null);
       setEditedRow(null);
@@ -213,7 +229,14 @@ export function DraggableEditableTable<T extends { id: number | string }>({
     } finally {
       setSaving(false);
     }
-  }, [editedRow, apiBaseUrl, columns]);
+  }, [
+    editedRow,
+    apiBaseUrl,
+    columns,
+    validateRow,
+    prepareRequest,
+    performSave,
+  ]);
 
   // -------------------- Delete --------------------
   const openDeleteConfirmModal = useCallback((id: number | string) => {
@@ -358,19 +381,21 @@ export function DraggableEditableTable<T extends { id: number | string }>({
 }
 
 // -------------------- Sortable Row (No Changes) --------------------
-function SortableRow<T extends { id: number | string }>(properties: {
-  cancelEditing: () => void;
-  columns: ColumnConfig<T>[];
-  editedRow: null | T;
-  isEditing: boolean;
-  openDeleteConfirmModal: (_id: number | string) => void;
-  row: T;
-  saveRow: () => Promise<void>;
-  saving: boolean;
-  startEditing: (_row: T) => void;
-  updateEditedRow: <K extends keyof T>(_key: K, _value: T[K]) => void;
-  validationErrors: Record<string, string>;
-}) {
+function SortableRow<T extends { id: number | string }>(
+  properties: Readonly<{
+    cancelEditing: () => void;
+    columns: ColumnConfig<T>[];
+    editedRow: null | T;
+    isEditing: boolean;
+    openDeleteConfirmModal: (_id: number | string) => void;
+    row: T;
+    saveRow: () => Promise<void>;
+    saving: boolean;
+    startEditing: (_row: T) => void;
+    updateEditedRow: <K extends keyof T>(_key: K, _value: T[K]) => void;
+    validationErrors: Record<string, string>;
+  }>
+) {
   const {
     cancelEditing,
     columns,

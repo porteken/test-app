@@ -119,7 +119,7 @@ export function InfiniteSearchableSelect<TData extends Entity>({
   search,
   selectedValue,
   setSearch,
-}: InfiniteSearchableSelectProperties<TData>) {
+}: Readonly<InfiniteSearchableSelectProperties<TData>>) {
   const [open, setOpen] = useState(false);
   const commandListReference = useRef<HTMLDivElement>(null);
 
@@ -157,6 +157,9 @@ export function InfiniteSearchableSelect<TData extends Entity>({
 
   const handleClear = useCallback(
     (event_: React.KeyboardEvent | React.MouseEvent) => {
+      if ("key" in event_ && event_.key !== "Enter" && event_.key !== " ") {
+        return;
+      }
       event_.preventDefault();
       event_.stopPropagation();
       onValueChange(null);
@@ -194,56 +197,56 @@ export function InfiniteSearchableSelect<TData extends Entity>({
       </label>
 
       <Popover onOpenChange={setOpen} open={open}>
-        <PopoverTrigger asChild>
-          <Button
-            aria-expanded={open}
-            aria-invalid={showError}
-            className={`
-              w-full justify-between
-              ${
-                showError
-                  ? `
-                    border-red-500
-                    focus:border-red-500
-                  `
-                  : ""
-              }
-            `}
-            disabled={disabled}
-            id={comboboxId}
-            onKeyDown={handleKeyDown}
-            role="combobox"
-            variant="outline"
-          >
-            <span className="truncate">
-              {selectedValue ? itemToName(selectedValue) : config.placeholder}
-            </span>
-
-            <div className="ml-2 flex items-center gap-1">
-              {selectedValue && !disabled && (
-                <span
-                  aria-label={`Clear filter for ${config.label}`}
-                  className={`
-                    flex h-4 w-4 cursor-pointer items-center justify-center
-                    rounded p-0
-                    hover:bg-gray-100
-                  `}
-                  onClick={handleClear}
-                  role="button"
-                  tabIndex={0}
-                >
-                  <X className="h-3 w-3" />
-                </span>
-              )}
+        <div className="relative">
+          <PopoverTrigger asChild>
+            <Button
+              aria-expanded={open}
+              aria-haspopup="listbox"
+              aria-invalid={showError}
+              className={`
+                w-full justify-between
+                ${
+                  showError
+                    ? `
+                      border-red-500
+                      focus:border-red-500
+                    `
+                    : ""
+                }
+              `}
+              disabled={disabled}
+              id={comboboxId}
+              onKeyDown={handleKeyDown}
+              variant="outline"
+            >
+              <span className="truncate">
+                {selectedValue ? itemToName(selectedValue) : config.placeholder}
+              </span>
 
               {isFetching && !isFetchingNextPage ? (
                 <Loader2 className="h-4 w-4 animate-spin opacity-70" />
               ) : (
                 <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
               )}
-            </div>
-          </Button>
-        </PopoverTrigger>
+            </Button>
+          </PopoverTrigger>
+
+          {selectedValue && !disabled && (
+            <button
+              aria-label={`Clear filter for ${config.label}`}
+              className={`
+                absolute right-6 top-1/2 -translate-y-1/2
+                flex h-5 w-5 cursor-pointer items-center justify-center
+                rounded p-0
+                hover:bg-gray-100
+              `}
+              onClick={handleClear}
+              type="button"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
 
         <PopoverContent
           align="start"
@@ -310,10 +313,10 @@ export function InfiniteSearchableSelect<TData extends Entity>({
 
 const fetchFilterOptions = async (
   fieldName: string,
+  apiConfig: ApiConfig,
   apiFilters: Record<string, string> = {},
   searchQuery = "",
   pageParameter = 1,
-  apiConfig: ApiConfig,
   signal?: AbortSignal
 ): Promise<InfiniteQueryPage> => {
   const parameters = new URLSearchParams({
@@ -401,10 +404,10 @@ const useFilterOptions = (
       }
       return fetchFilterOptions(
         currentConfig.apiField,
+        apiConfig,
         apiFilters,
         debouncedSearchQuery,
         pageParameter as number,
-        apiConfig,
         signal
       );
     },
@@ -499,6 +502,55 @@ interface FilterPanelProperties {
   onSelectChange: (_key: string, _value: Entity | null) => void;
 }
 
+interface FilterProps {
+  apiConfig: ApiConfig;
+  config: FilterConfig;
+  debouncedFilters: FiltersState;
+  disabled?: boolean;
+  errors?: Record<string, string>;
+  filterConfigs: FilterConfig[];
+  filters: FiltersState;
+  onSearchChange: (_key: string, _value: string) => void;
+  onSelectChange: (_key: string, _value: Entity | null) => void;
+}
+
+const Filter = ({
+  apiConfig,
+  config,
+  debouncedFilters,
+  disabled,
+  errors = {},
+  filterConfigs,
+  filters,
+  onSearchChange,
+  onSelectChange,
+}: FilterProps) => {
+  const filterQuery = useFilterOptions(
+    config.key,
+    debouncedFilters,
+    apiConfig,
+    filterConfigs
+  );
+
+  return (
+    <ConfigurableSelect
+      config={config}
+      data={filterQuery.data}
+      disabled={disabled}
+      error={errors[config.key]}
+      fetchNextPage={filterQuery.fetchNextPage}
+      hasNextPage={filterQuery.hasNextPage}
+      isError={filterQuery.isError}
+      isFetching={filterQuery.isFetching}
+      isFetchingNextPage={filterQuery.isFetchingNextPage}
+      onSearchChange={onSearchChange}
+      onSelectChange={onSelectChange}
+      search={filters[config.key]?.search || ""}
+      selectedValue={filters[config.key]?.selected || null}
+    />
+  );
+};
+
 export const FilterPanel = ({
   apiConfig,
   debouncedFilters,
@@ -542,33 +594,20 @@ export const FilterPanel = ({
           lg:grid-cols-3
         `}
       >
-        {filterConfigs.map(config => {
-          const filterQuery = useFilterOptions(
-            config.key,
-            debouncedFilters,
-            apiConfig,
-            filterConfigs
-          );
-
-          return (
-            <ConfigurableSelect
-              config={config}
-              data={filterQuery.data}
-              disabled={disabled}
-              error={errors[config.key]}
-              fetchNextPage={filterQuery.fetchNextPage}
-              hasNextPage={filterQuery.hasNextPage}
-              isError={filterQuery.isError}
-              isFetching={filterQuery.isFetching}
-              isFetchingNextPage={filterQuery.isFetchingNextPage}
-              key={config.key}
-              onSearchChange={onSearchChange}
-              onSelectChange={onSelectChange}
-              search={filters[config.key]?.search || ""}
-              selectedValue={filters[config.key]?.selected || null}
-            />
-          );
-        })}
+        {filterConfigs.map(config => (
+          <Filter
+            apiConfig={apiConfig}
+            config={config}
+            debouncedFilters={debouncedFilters}
+            disabled={disabled}
+            errors={errors}
+            filterConfigs={filterConfigs}
+            filters={filters}
+            key={config.key}
+            onSearchChange={onSearchChange}
+            onSelectChange={onSelectChange}
+          />
+        ))}
       </div>
     </div>
   );
