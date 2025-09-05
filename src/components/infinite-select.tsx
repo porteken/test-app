@@ -1,4 +1,5 @@
 import { InfiniteData } from "@tanstack/react-query";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronsUpDown, Loader2, X } from "lucide-react";
 import React, {
   useCallback,
@@ -53,13 +54,20 @@ export type InfiniteSearchableSelectProperties<TData extends Entity> = {
   isError: boolean;
   isFetching: boolean;
   isFetchingNextPage: boolean;
+  itemSize?: number; // px height of each item for virtualization
   itemToId: (_item: TData) => string;
-  itemToName: (_iitem: TData) => string;
+  itemToName: (_item: TData) => string;
   keepSearchOnSelect?: boolean;
-  onValueChange: (_ivalue: null | TData) => void;
+  onOpenChange?: (_open: boolean) => void;
+  onValueChange: (_value: null | TData) => void;
+  // Optional enhancements
+  open?: boolean;
+
   search: string;
   selectedValue: null | TData;
-  setSearch: (_isearch: string) => void;
+  setSearch: (_search: string) => void;
+  showClearWhenSearchNotEmpty?: boolean; // default true
+  useVirtualization?: boolean;
 };
 
 export function InfiniteSearchableSelect<TData extends Entity>({
@@ -72,15 +80,31 @@ export function InfiniteSearchableSelect<TData extends Entity>({
   isError,
   isFetching,
   isFetchingNextPage,
+  itemSize = 36,
   itemToId,
   itemToName,
   keepSearchOnSelect = false,
+  onOpenChange,
   onValueChange,
+  // Optional enhancements
+  open: controlledOpen,
+
   search,
   selectedValue,
   setSearch,
+  showClearWhenSearchNotEmpty = true,
+  useVirtualization = false,
 }: Readonly<InfiniteSearchableSelectProperties<TData>>) {
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = useCallback(
+    (value: boolean) => {
+      if (onOpenChange) onOpenChange(value);
+      if (controlledOpen === undefined) setUncontrolledOpen(value);
+    },
+    [controlledOpen, onOpenChange]
+  );
+
   const triggerReference = useRef<HTMLButtonElement>(null);
   const commandListReference = useRef<HTMLDivElement>(null);
 
@@ -95,6 +119,17 @@ export function InfiniteSearchableSelect<TData extends Entity>({
     () => data?.pages?.flatMap(p => p.items) ?? [],
     [data]
   );
+
+  // Virtualizer setup
+  const itemCount = allItems.length;
+  const parentReference = commandListReference;
+
+  const virtualizer = useVirtualizer({
+    count: useVirtualization ? itemCount : 0,
+    estimateSize: () => itemSize,
+    getScrollElement: () => parentReference.current,
+    overscan: 10,
+  });
 
   const { inView, ref: intersectionReference } = useInView({
     rootMargin: "100px",
@@ -112,6 +147,72 @@ export function InfiniteSearchableSelect<TData extends Entity>({
     if (inView) debouncedFetchNext();
   }, [inView, debouncedFetchNext]);
 
+  // Highlighted index for keyboard navigation
+  const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
+
+  useEffect(() => {
+    if (!open) {
+      setHighlightedIndex(-1);
+      return;
+    }
+    // Reset when search changes
+    setHighlightedIndex(previous => {
+      const next = Math.min(previous, Math.max(0, allItems.length - 1));
+      return next;
+    });
+  }, [open, allItems.length, search]);
+
+  const scrollHighlightedIntoView = useCallback(
+    (index: number) => {
+      if (index < 0) return;
+      if (useVirtualization && virtualizer) {
+        virtualizer.scrollToIndex(index, { align: "auto" });
+      } else if (commandListReference.current) {
+        const container = commandListReference.current;
+        const children =
+          container.querySelectorAll<HTMLElement>('[data-item="true"]');
+        const element = children[index];
+        if (element) {
+          const cTop = container.scrollTop;
+          const cBottom = cTop + container.clientHeight;
+          const eventTop = element.offsetTop;
+          const eventBottom = eventTop + element.offsetHeight;
+          if (eventTop < cTop) container.scrollTop = eventTop;
+          else if (eventBottom > cBottom)
+            container.scrollTop = eventBottom - container.clientHeight;
+        }
+      }
+    },
+    [useVirtualization, virtualizer]
+  );
+
+  const moveHighlight = useCallback(
+    (delta: number) => {
+      if (allItems.length === 0) return;
+      setHighlightedIndex(previous => {
+        let next;
+        if (previous < 0) {
+          next = delta > 0 ? 0 : allItems.length - 1;
+        } else {
+          next = (previous + delta + allItems.length) % allItems.length;
+        }
+        requestAnimationFrame(() => scrollHighlightedIntoView(next));
+        return next;
+      });
+    },
+    [allItems.length, scrollHighlightedIntoView]
+  );
+
+  const setHighlightAbsolute = useCallback(
+    (index: number) => {
+      if (allItems.length === 0) return;
+      const next = Math.max(0, Math.min(allItems.length - 1, index));
+      setHighlightedIndex(next);
+      requestAnimationFrame(() => scrollHighlightedIntoView(next));
+    },
+    [allItems.length, scrollHighlightedIntoView]
+  );
+
   const handleSelectItem = useCallback(
     (item: TData) => {
       if (disabled) return;
@@ -120,10 +221,16 @@ export function InfiniteSearchableSelect<TData extends Entity>({
         setSearch(itemToName(item) || "");
       }
       setOpen(false);
-      // Return focus to trigger for accessibility
       requestAnimationFrame(() => triggerReference.current?.focus());
     },
-    [disabled, keepSearchOnSelect, itemToName, onValueChange, setSearch]
+    [
+      disabled,
+      keepSearchOnSelect,
+      itemToName,
+      onValueChange,
+      setOpen,
+      setSearch,
+    ]
   );
 
   const handleClear = useCallback(
@@ -136,21 +243,76 @@ export function InfiniteSearchableSelect<TData extends Entity>({
       event.stopPropagation();
       onValueChange(null);
       setSearch("");
-      // Keep popover closed after clear to avoid confusion
       setOpen(false);
       requestAnimationFrame(() => triggerReference.current?.focus());
     },
-    [disabled, onValueChange, setSearch]
+    [disabled, onValueChange, setOpen, setSearch]
   );
 
-  const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
-    if (event.key === "Escape") {
-      event.stopPropagation();
-      event.preventDefault();
-      setOpen(false);
-      requestAnimationFrame(() => triggerReference.current?.focus());
-    }
-  }, []);
+  const handleInputKeyDown = useCallback(
+    (event: React.KeyboardEvent) => {
+      if (!open) return;
+
+      switch (event.key) {
+        case "ArrowDown": {
+          event.preventDefault();
+          moveHighlight(1);
+          break;
+        }
+        case "ArrowUp": {
+          event.preventDefault();
+          moveHighlight(-1);
+          break;
+        }
+        case "End": {
+          event.preventDefault();
+          setHighlightAbsolute(allItems.length - 1);
+          break;
+        }
+        case "Enter": {
+          if (highlightedIndex >= 0 && highlightedIndex < allItems.length) {
+            event.preventDefault();
+            const item = allItems[highlightedIndex];
+            if (item) handleSelectItem(item);
+          }
+          break;
+        }
+        case "Escape": {
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen(false);
+          requestAnimationFrame(() => triggerReference.current?.focus());
+          break;
+        }
+        case "Home": {
+          event.preventDefault();
+          setHighlightAbsolute(0);
+          break;
+        }
+        case "PageDown": {
+          event.preventDefault();
+          setHighlightAbsolute(
+            Math.min(Math.max(highlightedIndex, 0) + 10, allItems.length - 1)
+          );
+          break;
+        }
+        case "PageUp": {
+          event.preventDefault();
+          setHighlightAbsolute(Math.max(Math.max(highlightedIndex, 0) - 10, 0));
+          break;
+        }
+      }
+    },
+    [
+      allItems,
+      highlightedIndex,
+      moveHighlight,
+      open,
+      setHighlightAbsolute,
+      setOpen,
+      handleSelectItem,
+    ]
+  );
 
   // Reset scroll when search changes and list is visible
   useEffect(() => {
@@ -165,6 +327,12 @@ export function InfiniteSearchableSelect<TData extends Entity>({
     !showError && !isFetching && search.length > 0 && !hasValidItems;
   const showInitialEmpty =
     !showError && !isFetching && search.length === 0 && !hasValidItems;
+  const isInitialLoading = isFetching && !hasValidItems;
+
+  const shouldShowClear =
+    !!selectedValue &&
+    !disabled &&
+    (showClearWhenSearchNotEmpty || search.length === 0);
 
   return (
     <div className="flex flex-col gap-2">
@@ -189,7 +357,6 @@ export function InfiniteSearchableSelect<TData extends Entity>({
               data-error={showError ? "true" : undefined}
               disabled={disabled}
               id={comboboxId}
-              onKeyDown={handleKeyDown}
               ref={triggerReference}
               variant="outline"
             >
@@ -198,7 +365,7 @@ export function InfiniteSearchableSelect<TData extends Entity>({
               </span>
 
               <span className="ml-2 flex items-center gap-1">
-                {selectedValue && !disabled && (
+                {shouldShowClear && (
                   <button
                     aria-label={`Clear ${config.label}`}
                     className={`
@@ -221,7 +388,6 @@ export function InfiniteSearchableSelect<TData extends Entity>({
             </Button>
           </PopoverTrigger>
 
-          {/* Optional description for error */}
           {showError && error && (
             <span className="sr-only" id={describedById}>
               {error}
@@ -237,6 +403,7 @@ export function InfiniteSearchableSelect<TData extends Entity>({
             <CommandInput
               aria-label={`Search ${config.label}`}
               autoFocus
+              onKeyDown={handleInputKeyDown}
               onValueChange={setSearch}
               placeholder={config.placeholder}
               value={search}
@@ -253,6 +420,12 @@ export function InfiniteSearchableSelect<TData extends Entity>({
                 </CommandEmpty>
               )}
 
+              {isInitialLoading && (
+                <div className="flex h-24 items-center justify-center">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                </div>
+              )}
+
               {showInitialEmpty && (
                 <CommandEmpty>No options available</CommandEmpty>
               )}
@@ -261,20 +434,73 @@ export function InfiniteSearchableSelect<TData extends Entity>({
 
               {hasValidItems && (
                 <CommandGroup>
-                  {allItems.map(item => {
-                    const id = itemToId(item) || "";
-                    const label = itemToName(item) || "";
-                    return (
-                      <CommandItem
-                        className="cursor-pointer"
-                        key={id}
-                        onSelect={() => handleSelectItem(item)}
-                        value={id}
-                      >
-                        <span className="truncate">{label}</span>
-                      </CommandItem>
-                    );
-                  })}
+                  {useVirtualization && virtualizer ? (
+                    <div
+                      style={{
+                        height: `${virtualizer.getTotalSize()}px`,
+                        position: "relative",
+                        width: "100%",
+                      }}
+                    >
+                      {virtualizer
+                        .getVirtualItems()
+                        .map((vi: { index: number; start: number }) => {
+                          const item = allItems[vi.index];
+                          const id = itemToId(item) || "";
+                          const label = itemToName(item) || "";
+                          const isHighlighted = vi.index === highlightedIndex;
+                          return (
+                            <div
+                              data-index={vi.index}
+                              key={id}
+                              style={{
+                                left: 0,
+                                position: "absolute",
+                                top: 0,
+                                transform: `translateY(${vi.start}px)`,
+                                width: "100%",
+                              }}
+                            >
+                              <CommandItem
+                                className={`
+                                  cursor-pointer
+                                  ${isHighlighted ? "bg-accent" : ""}
+                                `}
+                                data-item="true"
+                                onMouseEnter={() =>
+                                  setHighlightedIndex(vi.index)
+                                }
+                                onSelect={() => handleSelectItem(item)}
+                                value={id}
+                              >
+                                <span className="truncate">{label}</span>
+                              </CommandItem>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  ) : (
+                    allItems.map((item, index) => {
+                      const id = itemToId(item) || "";
+                      const label = itemToName(item) || "";
+                      const isHighlighted = index === highlightedIndex;
+                      return (
+                        <CommandItem
+                          className={`
+                            cursor-pointer
+                            ${isHighlighted ? "bg-accent" : ""}
+                          `}
+                          data-item="true"
+                          key={id}
+                          onMouseEnter={() => setHighlightedIndex(index)}
+                          onSelect={() => handleSelectItem(item)}
+                          value={id}
+                        >
+                          <span className="truncate">{label}</span>
+                        </CommandItem>
+                      );
+                    })
+                  )}
                 </CommandGroup>
               )}
 
