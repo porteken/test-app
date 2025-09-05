@@ -20,6 +20,7 @@ import {
   describe,
   expect,
   it,
+  type MockInstance,
   vi,
 } from "vitest";
 
@@ -245,7 +246,7 @@ beforeAll(() => {
   });
 });
 afterAll(() => {
-  (console.error as unknown as vi.MockInstance).mockRestore();
+  (console.error as unknown as MockInstance).mockRestore();
 });
 
 // Helper MSW overrides
