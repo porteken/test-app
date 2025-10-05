@@ -74,6 +74,7 @@
     "eslint-plugin-perfectionist": "^4.15.0",
     "eslint-plugin-promise": "^7.2.1",
     "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^6.1.1",
     "eslint-plugin-storybook": "^9.1.4",
     "eslint-plugin-unicorn": "^60.0.0",
     "msw": "^2.11.1",

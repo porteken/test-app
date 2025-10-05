@@ -10,6 +10,7 @@ import importPlugin from "eslint-plugin-import";
 import perfectionist from "eslint-plugin-perfectionist";
 import pluginPromise from "eslint-plugin-promise";
 import pluginReact from "eslint-plugin-react";
+import pluginReactHooks from "eslint-plugin-react-hooks";
 import eslintPluginUnicorn from "eslint-plugin-unicorn";
 import globals from "globals";
 import tseslint from "typescript-eslint";
@@ -108,10 +109,12 @@ export default tseslint.config([
   {
     plugins: {
       "@next/next": nextPlugin,
+      "react-hooks": pluginReactHooks,
     },
     rules: {
       ...nextPlugin.configs.recommended.rules,
       ...nextPlugin.configs["core-web-vitals"].rules,
+      ...pluginReactHooks.configs.recommended.rules,
     },
   },
   {

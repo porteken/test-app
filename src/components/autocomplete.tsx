@@ -94,7 +94,6 @@ export function Autocomplete({
     if (loadOnFocus && list.items.length === 0) {
       list.reload();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadOnFocus]);
 
   const handleInputChange = (value: string) => {
@@ -180,8 +179,8 @@ export function Autocomplete({
       </div>
       <Popover
         className={`
-          w-[--trigger-width] rounded-md border border-border
-          bg-popover text-popover-foreground shadow-md
+          w-[--trigger-width] rounded-md border border-border bg-popover
+          text-popover-foreground shadow-md
           data-[entering]:animate-in data-[entering]:fade-in-0
           data-[entering]:zoom-in-95
           data-[exiting]:animate-out data-[exiting]:fade-out-0
@@ -230,7 +229,9 @@ export function Autocomplete({
 
               return (
                 <div
-                  className={`px-3 py-6 text-center text-sm text-muted-foreground`}
+                  className={`
+                    px-3 py-6 text-center text-sm text-muted-foreground
+                  `}
                 >
                   Start typing to search...
                 </div>
