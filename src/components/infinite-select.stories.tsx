@@ -1,5 +1,6 @@
-// Corrected: Importing Meta and StoryObj from the framework package
+// stories/InfiniteSearchableSelect.stories.tsx
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
+import type { ComponentProps } from "react";
 
 import {
   QueryClient,
@@ -9,111 +10,91 @@ import {
 import { http, HttpResponse } from "msw";
 import React, { useState } from "react";
 
-// Import the component and its required types
-import {
-  type Entity,
-  type InfiniteQueryPage,
-  InfiniteSearchableSelect,
-  type InfiniteSearchableSelectProperties,
-} from "./infinite-select";
+// Import the KV-based component (path may differ)
+import { InfiniteSearchableSelect } from "@/components/infinite-select";
 
-// Define a specific mock entity type for this story, extending the base Entity
-type MockEntity = Entity;
+type InfiniteQueryPageKV = { items: KVItem[]; nextPage?: number };
+// Local types for the story
+type KVItem = { key: number | string; value: string };
 
 // --- Storybook Meta Configuration ---
-const meta: Meta<typeof InfiniteSearchableSelect<MockEntity>> = {
-  argTypes: {
-    // ...
-  },
+const meta: Meta<typeof InfiniteSearchableSelect> = {
+  argTypes: {},
   component: InfiniteSearchableSelect,
-
-  // Add the isolated decorator here
   decorators: [
     Story => {
       const [queryClient] = useState(() => new QueryClient());
       return (
         <QueryClientProvider client={queryClient}>
-          {/* A container to give the popover some space */}
-          <div style={{ minHeight: "350px" }}>
+          <div style={{ minHeight: 350, padding: 16 }}>
             <Story />
           </div>
         </QueryClientProvider>
       );
     },
   ],
-
+  parameters: {
+    docs: { autodocs: "tag" },
+  },
   tags: ["autodocs"],
-
   title: "Components/Infinite Select",
 };
-
 export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-// --- Reusable Component for Story Logic ---
-// This wrapper component encapsulates the React Query hooks and state management
-// so that stories can focus on passing props (args).
+// --- Reusable Story Wrapper ---
 const InfiniteSearchableSelectStoryComponent = (
   arguments_: Omit<
-    InfiniteSearchableSelectProperties<MockEntity>,
-    | "data"
-    | "error"
-    | "fetchNextPage"
-    | "hasNextPage"
-    | "isError"
-    | "isFetching"
-    | "isFetchingNextPage"
-    | "itemToId"
-    | "itemToName"
-    | "onValueChange"
-    | "search"
-    | "selectedValue"
-    | "setSearch"
+    ComponentProps<typeof InfiniteSearchableSelect>,
+    "config" | "query"
   >
 ) => {
   const [search, setSearch] = useState("");
-  const [selectedValue, setSelectedValue] = useState<MockEntity | null>(null);
 
-  const {
-    data,
-    error,
-    fetchNextPage,
-    hasNextPage,
-    isError,
-    isFetching,
-    isFetchingNextPage,
-  } = useInfiniteQuery<InfiniteQueryPage<MockEntity>, Error>({
+  const query = useInfiniteQuery<InfiniteQueryPageKV, Error>({
     getNextPageParam: lastPage => lastPage.nextPage,
     initialPageParam: 1,
     queryFn: async ({ pageParam: pageParameter = 1 }) => {
       const response = await fetch(
-        `/api/entities?search=${search}&page=${pageParameter}`
+        `/api/entities?search=${encodeURIComponent(
+          search
+        )}&page=${pageParameter}`
       );
       if (!response.ok) {
         throw new Error("Network response was not ok");
       }
       return response.json();
     },
-    queryKey: ["entities", search],
+    queryKey: ["entities-kv", search],
   });
 
   return (
     <InfiniteSearchableSelect
       {...arguments_}
-      data={data}
-      error={error?.message}
-      fetchNextPage={fetchNextPage}
-      hasNextPage={!!hasNextPage}
-      isError={isError}
-      isFetching={isFetching}
-      isFetchingNextPage={isFetchingNextPage}
-      itemToId={(item: MockEntity) => item.id}
-      itemToName={(item: MockEntity) => item.name}
-      onValueChange={(value: MockEntity | null) => setSelectedValue(value)}
+      config={{
+        apiField: "entityKey",
+        key: "entity-kv",
+        label: "Select an Entity",
+        placeholder: "Search for an entity...",
+      }}
+      disabled={false}
+      onSearchChange={setSearch}
+      query={{
+        data: query.data,
+        error: query.error ?? null,
+        // Wrap to satisfy a void-returning signature if your component expects void
+        fetchNextPage: () => {
+          void query.fetchNextPage();
+        },
+        hasNextPage: query.hasNextPage,
+        isError: query.isError,
+        isFetching: query.isFetching,
+        isFetchingNextPage: query.isFetchingNextPage,
+      }}
+      // Optional external search control (component also supports internal)
       search={search}
-      selectedValue={selectedValue}
-      setSearch={setSearch}
+      // onChange={v => console.log("Selected:", v)}
     />
   );
 };
@@ -121,34 +102,21 @@ const InfiniteSearchableSelectStoryComponent = (
 // --- Stories ---
 
 export const Default: Story = {
-  args: {
-    config: {
-      apiField: "entityId",
-      key: "entity",
-      label: "Select an Entity",
-      placeholder: "Search for an entity...",
-    },
-    disabled: false,
-  },
-  render: arguments_ => (
+  args: { disabled: false },
+  render: (arguments_: ComponentProps<typeof InfiniteSearchableSelect>) => (
     <InfiniteSearchableSelectStoryComponent {...arguments_} />
   ),
 };
 
 export const Disabled: Story = {
-  args: {
-    ...Default.args,
-    disabled: true,
-  },
-  render: arguments_ => (
+  args: { disabled: true },
+  render: (arguments_: ComponentProps<typeof InfiniteSearchableSelect>) => (
     <InfiniteSearchableSelectStoryComponent {...arguments_} />
   ),
 };
 
 export const WithError: Story = {
-  args: {
-    ...Default.args,
-  },
+  args: { disabled: false },
   parameters: {
     msw: {
       handlers: [
@@ -166,7 +134,45 @@ export const WithError: Story = {
       ],
     },
   },
-  render: arguments_ => (
+  render: (arguments_: ComponentProps<typeof InfiniteSearchableSelect>) => (
+    <InfiniteSearchableSelectStoryComponent {...arguments_} />
+  ),
+};
+
+export const WithManyItems: Story = {
+  args: { disabled: false },
+  parameters: {
+    msw: {
+      handlers: [
+        http.get("/api/entities", ({ request }) => {
+          const url = new URL(request.url);
+          const search = url.searchParams.get("search") || "";
+          const page = Number.parseInt(url.searchParams.get("page") || "1", 10);
+          const pageSize = 20;
+
+          const all: KVItem[] = Array.from({ length: 300 }, (_, index) => ({
+            key: `entity-${index + 1}`,
+            value: `Mock Entity ${index + 1}`,
+          }));
+
+          const filtered = all.filter(item =>
+            item.value.toLowerCase().includes(search.toLowerCase())
+          );
+
+          const start = (page - 1) * pageSize;
+          const end = start + pageSize;
+
+          const body: InfiniteQueryPageKV = {
+            items: filtered.slice(start, end),
+            nextPage: end < filtered.length ? page + 1 : undefined,
+          };
+
+          return HttpResponse.json(body);
+        }),
+      ],
+    },
+  },
+  render: (arguments_: ComponentProps<typeof InfiniteSearchableSelect>) => (
     <InfiniteSearchableSelectStoryComponent {...arguments_} />
   ),
 };

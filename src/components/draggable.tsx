@@ -46,7 +46,7 @@ interface DraggableEditableTableProperties<T extends { id: number | string }> {
   columns: ColumnConfig<T>[];
   createNewRow: (_position: number) => T;
 }
-
+type RowType = number | string | undefined
 // -------------------- Component --------------------
 export function DraggableEditableTable<T extends { id: number | string }>({
   apiBaseUrl,
@@ -54,32 +54,31 @@ export function DraggableEditableTable<T extends { id: number | string }>({
   createNewRow,
 }: Readonly<DraggableEditableTableProperties<T>>) {
   const [data, setData] = useState<T[]>([]);
-  const [editingRowId, setEditingRowId] = useState<null | number | string>(
-    null
-  );
-  const [editedRow, setEditedRow] = useState<null | T>(null);
-  const [rowToDelete, setRowToDelete] = useState<null | number | string>(null);
+  const [editingRowId, setEditingRowId] = useState<RowType>();
+  const [editedRow, setEditedRow] = useState<T | undefined>();
+  const [rowToDelete, setRowToDelete] = useState<RowType>();
   const [validationErrors, setValidationErrors] = useState<
     Record<string, string>
   >({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
+  const [deleting, setDeleting] = useState<RowType>();
+  const [error, setError] = useState<Error | undefined>();
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
   const sortableIds = useMemo(() => data.map(item => item.id), [data]);
-  const hasUnsavedChanges = editingRowId !== null;
+  const hasUnsavedChanges = editingRowId !== undefined;
 
   // -------------------- Fetch --------------------
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
-      setError(null);
+      setError(undefined);
       const response = await fetch(apiBaseUrl);
       if (!response.ok) {
         throw new Error(`Failed to fetch: ${response.statusText}`);
       }
-      const result = await response.json();
+      const result: T[] = await response.json();
       setData(result);
     } catch (error_) {
       const error__ =
@@ -114,29 +113,35 @@ export function DraggableEditableTable<T extends { id: number | string }>({
         return;
       }
 
+      const originalData = [...data];
       const reordered = arrayMove(data, oldIndex, newIndex);
       setData(reordered);
 
       try {
-        await Promise.all(
-          reordered.map((row, index) =>
-            fetch(`${apiBaseUrl}/${row.id}`, {
-              body: JSON.stringify({ ...row, position: index }),
-              headers: { "Content-Type": "application/json" },
-              method: "PUT",
-            })
-          )
-        );
+        const updatePromises = reordered.map(async (row, index) => {
+          const response = await fetch(`${apiBaseUrl}/${row.id}`, {
+            body: JSON.stringify({ ...row, position: index }),
+            headers: { "Content-Type": "application/json" },
+            method: "PUT",
+          });
+          if (!response.ok) {
+            throw new Error(`Failed to update position for row ${row.id}`);
+          }
+          const result: T = await response.json();
+          return result;
+        });
+
+        await Promise.all(updatePromises);
         toast.success("Row order updated");
       } catch (error_) {
         const errorMessage =
           error_ instanceof Error ? error_.message : "Failed to update order";
         toast.error("Error updating order", { description: errorMessage });
         // Revert to original order on failure
-        fetchData();
+        setData(originalData);
       }
     },
-    [data, apiBaseUrl, fetchData]
+    [data, apiBaseUrl]
   );
 
   // -------------------- Editing --------------------
@@ -150,51 +155,52 @@ export function DraggableEditableTable<T extends { id: number | string }>({
     if (editedRow && !isPersistentId(editedRow.id)) {
       setData(current => current.filter(r => r.id !== editedRow.id));
     }
-    setEditingRowId(null);
-    setEditedRow(null);
+    setEditingRowId(undefined);
+    setEditedRow(undefined);
     setValidationErrors({});
   }, [editedRow]);
 
-  const validateRow = useCallback((row: T, cols: ColumnConfig<T>[]) => {
-    const errors: Record<string, string> = {};
-    for (const col of cols) {
-      if (col.validate) {
-        const error = col.validate(row[col.key], row);
-        if (error) {
-          errors[col.key as string] = error;
+  // -------------------- API Service --------------------
+  const apiService = useMemo(
+    () => ({
+      performSave: async (url: string, method: string, payload: Partial<T>): Promise<T> => {
+        const response = await fetch(url, {
+          body: JSON.stringify(payload),
+          headers: { "Content-Type": "application/json" },
+          method,
+        });
+        if (!response.ok) {
+          const errorBody = await response.json().catch(() => ({}));
+          throw new Error(
+            errorBody.message || `Failed to save: ${response.statusText}`
+          );
         }
-      }
-    }
-    return errors;
-  }, []);
-
-  const prepareRequest = useCallback((row: T, baseUrl: string) => {
-    const isNew = !isPersistentId(row.id);
-    const url = isNew ? baseUrl : `${baseUrl}/${row.id}`;
-    const method = isNew ? "POST" : "PUT";
-    const payload = { ...row };
-    if (isNew) {
-      delete (payload as { id?: number | string }).id;
-    }
-    return { url, method, payload, isNew };
-  }, []);
-
-  const performSave = useCallback(
-    async (url: string, method: string, payload: any) => {
-      const response = await fetch(url, {
-        body: JSON.stringify(payload),
-        headers: { "Content-Type": "application/json" },
-        method,
-      });
-      if (!response.ok) {
-        const errorBody = await response.json().catch(() => ({}));
-        throw new Error(
-          errorBody.message || `Failed to save: ${response.statusText}`
-        );
-      }
-      const saved = await response.json();
-      return saved;
-    },
+        const result: T = await response.json();
+        return result;
+      },
+      prepareRequest: (row: T, baseUrl: string) => {
+        const isNew = !isPersistentId(row.id);
+        const url = isNew ? baseUrl : `${baseUrl}/${row.id}`;
+        const method = isNew ? "POST" : "PUT";
+        const payload = { ...row };
+        if (isNew) {
+          delete (payload as { id?: number | string }).id;
+        }
+        return { isNew, method, payload, url };
+      },
+      validateRow: (row: T, cols: ColumnConfig<T>[]) => {
+        const errors: Record<string, string> = {};
+        for (const col of cols) {
+          if (col.validate) {
+            const error = col.validate(row[col.key], row);
+            if (error) {
+              errors[col.key as string] = error;
+            }
+          }
+        }
+        return errors;
+      },
+    }),
     []
   );
 
@@ -203,24 +209,24 @@ export function DraggableEditableTable<T extends { id: number | string }>({
       return;
     }
 
-    const errors = validateRow(editedRow, columns);
+    const errors = apiService.validateRow(editedRow, columns);
     if (Object.keys(errors).length > 0) {
       setValidationErrors(errors);
       return;
     }
 
-    const { url, method, payload, isNew } = prepareRequest(
+    const { isNew, method, payload, url } = apiService.prepareRequest(
       editedRow,
       apiBaseUrl
     );
 
     try {
       setSaving(true);
-      const saved = await performSave(url, method, payload);
+      const saved = await apiService.performSave(url, method, payload);
       setData(current => current.map(r => (r.id === editedRow.id ? saved : r)));
       toast.success(`Record ${isNew ? "created" : "updated"}`);
-      setEditingRowId(null);
-      setEditedRow(null);
+      setEditingRowId(undefined);
+      setEditedRow(undefined);
       setValidationErrors({});
     } catch (error_) {
       const errorMessage =
@@ -229,14 +235,27 @@ export function DraggableEditableTable<T extends { id: number | string }>({
     } finally {
       setSaving(false);
     }
-  }, [
-    editedRow,
-    apiBaseUrl,
-    columns,
-    validateRow,
-    prepareRequest,
-    performSave,
-  ]);
+  }, [editedRow, apiBaseUrl, columns, apiService]);
+
+  // -------------------- Keyboard handlers --------------------
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (editingRowId === undefined) {
+        return;
+      }
+
+      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        saveRow();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        cancelEditing();
+      }
+    };
+
+    globalThis.addEventListener("keydown", handleKeyDown);
+    return () => globalThis.removeEventListener("keydown", handleKeyDown);
+  }, [editingRowId, saveRow, cancelEditing]);
 
   // -------------------- Delete --------------------
   const openDeleteConfirmModal = useCallback((id: number | string) => {
@@ -245,23 +264,45 @@ export function DraggableEditableTable<T extends { id: number | string }>({
   }, []);
 
   const confirmDelete = useCallback(async () => {
-    if (rowToDelete === null) {
+    if (rowToDelete === undefined) {
       return;
     }
 
+    const deletedRow = data.find(r => r.id === rowToDelete);
+    if (!deletedRow) {
+      return;
+    }
+
+    // Optimistic update
+    setData(current => current.filter(r => r.id !== rowToDelete));
+    setDeleteModalOpen(false);
+    setDeleting(rowToDelete);
+    setRowToDelete(undefined);
+
     try {
-      await fetch(`${apiBaseUrl}/${rowToDelete}`, { method: "DELETE" });
-      setData(current => current.filter(r => r.id !== rowToDelete));
+      const response = await fetch(`${apiBaseUrl}/${rowToDelete}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to delete: ${response.statusText}`);
+      }
       toast.success("Record deleted");
     } catch (error_) {
       const errorMessage =
         error_ instanceof Error ? error_.message : "Failed to delete record";
       toast.error("Error deleting record", { description: errorMessage });
+      // Rollback on failure
+      setData(current => {
+        const index = current.findIndex(r => r.id > deletedRow.id);
+        if (index === -1) {
+          return [...current, deletedRow];
+        }
+        return [...current.slice(0, index), deletedRow, ...current.slice(index)];
+      });
     } finally {
-      setDeleteModalOpen(false);
-      setRowToDelete(null);
+      setDeleting(undefined);
     }
-  }, [rowToDelete, apiBaseUrl]);
+  }, [rowToDelete, apiBaseUrl, data]);
 
   // -------------------- Add --------------------
   const addRow = useCallback(() => {
@@ -278,7 +319,7 @@ export function DraggableEditableTable<T extends { id: number | string }>({
   const updateEditedRow = useCallback(
     <K extends keyof T>(key: K, value: T[K]) => {
       setEditedRow(previous =>
-        previous ? { ...previous, [key]: value } : null
+        previous ? { ...previous, [key]: value } : undefined
       );
       setValidationErrors(previous => {
         const newErrors = { ...previous };
@@ -352,6 +393,7 @@ export function DraggableEditableTable<T extends { id: number | string }>({
                   <SortableRow
                     cancelEditing={cancelEditing}
                     columns={columns}
+                    deleting={deleting === row.id}
                     editedRow={editedRow}
                     isEditing={editingRowId === row.id}
                     key={row.id}
@@ -380,12 +422,13 @@ export function DraggableEditableTable<T extends { id: number | string }>({
   );
 }
 
-// -------------------- Sortable Row (No Changes) --------------------
+// -------------------- Sortable Row --------------------
 function SortableRow<T extends { id: number | string }>(
   properties: Readonly<{
     cancelEditing: () => void;
     columns: ColumnConfig<T>[];
-    editedRow: null | T;
+    deleting: boolean;
+    editedRow: T | undefined;
     isEditing: boolean;
     openDeleteConfirmModal: (_id: number | string) => void;
     row: T;
@@ -399,6 +442,7 @@ function SortableRow<T extends { id: number | string }>(
   const {
     cancelEditing,
     columns,
+    deleting,
     editedRow,
     isEditing,
     openDeleteConfirmModal,
@@ -434,7 +478,10 @@ function SortableRow<T extends { id: number | string }>(
       ref={setNodeRef}
       style={style}
       {...attributes}
-      className={isEditing ? "bg-yellow-50" : ""}
+      className={`
+        ${isEditing ? "bg-yellow-50" : ""}
+        ${deleting ? "opacity-50" : ""}
+      `}
     >
       {/* Drag Handle */}
       <TableCell className="w-10">

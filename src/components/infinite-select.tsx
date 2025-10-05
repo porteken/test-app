@@ -27,82 +27,84 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 
-export type Entity = {
-  id: string;
-  name: string;
-};
-
 export type FilterConfig = {
   apiField: string;
   key: string;
   label: string;
   placeholder: string;
 };
-
-export type InfiniteQueryPage<TItem extends Entity = Entity> = {
-  items: TItem[];
-  nextPage?: number;
-};
-
-export type InfiniteSearchableSelectProperties<TData extends Entity> = {
-  config: FilterConfig;
-  data: InfiniteData<InfiniteQueryPage<TData>> | undefined;
-  disabled?: boolean;
-  error?: string;
+export type InfiniteQueryPageKV = { items: KVItem[]; nextPage?: number };
+export type InfiniteQueryResult<TPage> = {
+  data: InfiniteData<TPage> | undefined;
+  error?: Error | null;
   fetchNextPage: () => void;
-  hasNextPage: boolean;
+  hasNextPage: boolean | undefined;
   isError: boolean;
   isFetching: boolean;
   isFetchingNextPage: boolean;
-  itemSize?: number; // px height of each item for virtualization
-  itemToId: (_item: TData) => string;
-  itemToName: (_item: TData) => string;
-  keepSearchOnSelect?: boolean;
-  onOpenChange?: (_open: boolean) => void;
-  onValueChange: (_value: null | TData) => void;
-  // Optional enhancements
-  open?: boolean;
-
-  search: string;
-  selectedValue: null | TData;
-  setSearch: (_search: string) => void;
-  showClearWhenSearchNotEmpty?: boolean; // default true
-  useVirtualization?: boolean;
 };
 
-export function InfiniteSearchableSelect<TData extends Entity>({
-  config,
-  data,
-  disabled = false,
-  error,
-  fetchNextPage,
-  hasNextPage,
-  isError,
-  isFetching,
-  isFetchingNextPage,
-  itemSize = 36,
-  itemToId,
-  itemToName,
-  keepSearchOnSelect = false,
-  onOpenChange,
-  onValueChange,
-  // Optional enhancements
-  open: controlledOpen,
+export type InfiniteSearchableSelectProperties = {
+  config: FilterConfig;
+  disabled?: boolean;
 
-  search,
-  selectedValue,
-  setSearch,
+  // Required virtualization config
+  itemSize?: number;
+
+  // UX toggles
+  keepSearchOnSelect?: boolean;
+
+  // Optional outward notification when selection changes
+  onChange?: (_value: KVItem | null) => void;
+  onSearchChange?: (_s: string) => void;
+
+  // Entire React Query infinite result passed in
+  query: InfiniteQueryResult<InfiniteQueryPageKV>;
+
+  // Optional external search control (defaults to internal)
+  search?: string;
+  showClearWhenSearchNotEmpty?: boolean;
+};
+
+export type KVItem = { key: number | string; value: string };
+
+export function InfiniteSearchableSelect({
+  config,
+  disabled = false,
+  itemSize = 36,
+  keepSearchOnSelect = false,
+  onChange,
+  onSearchChange,
+  query,
+  search: controlledSearch,
   showClearWhenSearchNotEmpty = true,
-  useVirtualization = false,
-}: Readonly<InfiniteSearchableSelectProperties<TData>>) {
-  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
-  const open = controlledOpen ?? uncontrolledOpen;
-  const setOpen = useCallback(
-    (value: boolean) => {
-      if (onOpenChange) onOpenChange(value);
-      if (controlledOpen === undefined) setUncontrolledOpen(value);
+}: Readonly<InfiniteSearchableSelectProperties>) {
+  const {
+    data,
+    error,
+    fetchNextPage,
+    hasNextPage,
+    isError,
+    isFetching,
+    isFetchingNextPage,
+  } = query;
+
+  // Internal selection and open state
+  const [selectedValue, setSelectedValue] = useState<KVItem | null>(null);
+  const [open, setOpen] = useState(false);
+
+  // Search can be controlled or internal
+  const [internalSearch, setInternalSearch] = useState("");
+  const search = controlledSearch ?? internalSearch;
+  const setSearch = useCallback(
+    (s: string) => {
+      if (onSearchChange) {
+        onSearchChange(s);
+      } else {
+        setInternalSearch(s);
+      }
     },
-    [controlledOpen, onOpenChange]
+    [onSearchChange]
   );
 
   const triggerReference = useRef<HTMLButtonElement>(null);
@@ -115,19 +117,16 @@ export function InfiniteSearchableSelect<TData extends Entity>({
     [comboboxId]
   );
 
-  const allItems = useMemo<TData[]>(
+  const allItems = useMemo<KVItem[]>(
     () => data?.pages?.flatMap(p => p.items) ?? [],
     [data]
   );
 
-  // Virtualizer setup
-  const itemCount = allItems.length;
-  const parentReference = commandListReference;
-
+  // Virtualizer — required and always called
   const virtualizer = useVirtualizer({
-    count: useVirtualization ? itemCount : 0,
+    count: allItems.length,
     estimateSize: () => itemSize,
-    getScrollElement: () => parentReference.current,
+    getScrollElement: () => commandListReference.current,
     overscan: 10,
   });
 
@@ -137,7 +136,7 @@ export function InfiniteSearchableSelect<TData extends Entity>({
   });
 
   const canLoadMore =
-    hasNextPage && !isFetching && !isFetchingNextPage && !disabled;
+    !!hasNextPage && !isFetching && !isFetchingNextPage && !disabled;
 
   const debouncedFetchNext = useDebouncedCallback(() => {
     if (canLoadMore) fetchNextPage();
@@ -147,7 +146,7 @@ export function InfiniteSearchableSelect<TData extends Entity>({
     if (inView) debouncedFetchNext();
   }, [inView, debouncedFetchNext]);
 
-  // Highlighted index for keyboard navigation
+  // Keyboard navigation
   const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
 
   useEffect(() => {
@@ -155,35 +154,17 @@ export function InfiniteSearchableSelect<TData extends Entity>({
       setHighlightedIndex(-1);
       return;
     }
-    // Reset when search changes
-    setHighlightedIndex(previous => {
-      const next = Math.min(previous, Math.max(0, allItems.length - 1));
-      return next;
-    });
+    setHighlightedIndex(previous =>
+      Math.min(previous, Math.max(0, allItems.length - 1))
+    );
   }, [open, allItems.length, search]);
 
   const scrollHighlightedIntoView = useCallback(
     (index: number) => {
       if (index < 0) return;
-      if (useVirtualization && virtualizer) {
-        virtualizer.scrollToIndex(index, { align: "auto" });
-      } else if (commandListReference.current) {
-        const container = commandListReference.current;
-        const children =
-          container.querySelectorAll<HTMLElement>('[data-item="true"]');
-        const element = children[index];
-        if (element) {
-          const cTop = container.scrollTop;
-          const cBottom = cTop + container.clientHeight;
-          const eventTop = element.offsetTop;
-          const eventBottom = eventTop + element.offsetHeight;
-          if (eventTop < cTop) container.scrollTop = eventTop;
-          else if (eventBottom > cBottom)
-            container.scrollTop = eventBottom - container.clientHeight;
-        }
-      }
+      virtualizer.scrollToIndex(index, { align: "auto" });
     },
-    [useVirtualization, virtualizer]
+    [virtualizer]
   );
 
   const moveHighlight = useCallback(
@@ -191,11 +172,8 @@ export function InfiniteSearchableSelect<TData extends Entity>({
       if (allItems.length === 0) return;
       setHighlightedIndex(previous => {
         let next;
-        if (previous < 0) {
-          next = delta > 0 ? 0 : allItems.length - 1;
-        } else {
-          next = (previous + delta + allItems.length) % allItems.length;
-        }
+        if (previous < 0) next = delta > 0 ? 0 : allItems.length - 1;
+        else next = (previous + delta + allItems.length) % allItems.length;
         requestAnimationFrame(() => scrollHighlightedIntoView(next));
         return next;
       });
@@ -214,23 +192,17 @@ export function InfiniteSearchableSelect<TData extends Entity>({
   );
 
   const handleSelectItem = useCallback(
-    (item: TData) => {
+    (item: KVItem) => {
       if (disabled) return;
-      onValueChange(item);
+      setSelectedValue(item);
+      onChange?.(item);
       if (!keepSearchOnSelect) {
-        setSearch(itemToName(item) || "");
+        setSearch(item.value || "");
       }
       setOpen(false);
       requestAnimationFrame(() => triggerReference.current?.focus());
     },
-    [
-      disabled,
-      keepSearchOnSelect,
-      itemToName,
-      onValueChange,
-      setOpen,
-      setSearch,
-    ]
+    [disabled, keepSearchOnSelect, onChange, setSearch]
   );
 
   const handleClear = useCallback(
@@ -241,12 +213,13 @@ export function InfiniteSearchableSelect<TData extends Entity>({
       }
       event.preventDefault();
       event.stopPropagation();
-      onValueChange(null);
+      setSelectedValue(null);
+      onChange?.(null);
       setSearch("");
       setOpen(false);
       requestAnimationFrame(() => triggerReference.current?.focus());
     },
-    [disabled, onValueChange, setOpen, setSearch]
+    [disabled, onChange, setSearch]
   );
 
   const handleInputKeyDown = useCallback(
@@ -309,7 +282,6 @@ export function InfiniteSearchableSelect<TData extends Entity>({
       moveHighlight,
       open,
       setHighlightAbsolute,
-      setOpen,
       handleSelectItem,
     ]
   );
@@ -361,7 +333,7 @@ export function InfiniteSearchableSelect<TData extends Entity>({
               variant="outline"
             >
               <span className="truncate">
-                {selectedValue ? itemToName(selectedValue) : config.placeholder}
+                {selectedValue ? selectedValue.value : config.placeholder}
               </span>
 
               <span className="ml-2 flex items-center gap-1">
@@ -390,7 +362,7 @@ export function InfiniteSearchableSelect<TData extends Entity>({
 
           {showError && error && (
             <span className="sr-only" id={describedById}>
-              {error}
+              {error.message}
             </span>
           )}
         </div>
@@ -416,7 +388,7 @@ export function InfiniteSearchableSelect<TData extends Entity>({
             >
               {showError && (
                 <CommandEmpty className="text-red-500">
-                  {error || "Error fetching data"}
+                  {error?.message || "Error fetching data"}
                 </CommandEmpty>
               )}
 
@@ -434,73 +406,46 @@ export function InfiniteSearchableSelect<TData extends Entity>({
 
               {hasValidItems && (
                 <CommandGroup>
-                  {useVirtualization && virtualizer ? (
-                    <div
-                      style={{
-                        height: `${virtualizer.getTotalSize()}px`,
-                        position: "relative",
-                        width: "100%",
-                      }}
-                    >
-                      {virtualizer
-                        .getVirtualItems()
-                        .map((vi: { index: number; start: number }) => {
-                          const item = allItems[vi.index];
-                          const id = itemToId(item) || "";
-                          const label = itemToName(item) || "";
-                          const isHighlighted = vi.index === highlightedIndex;
-                          return (
-                            <div
-                              data-index={vi.index}
-                              key={id}
-                              style={{
-                                left: 0,
-                                position: "absolute",
-                                top: 0,
-                                transform: `translateY(${vi.start}px)`,
-                                width: "100%",
-                              }}
-                            >
-                              <CommandItem
-                                className={`
-                                  cursor-pointer
-                                  ${isHighlighted ? "bg-accent" : ""}
-                                `}
-                                data-item="true"
-                                onMouseEnter={() =>
-                                  setHighlightedIndex(vi.index)
-                                }
-                                onSelect={() => handleSelectItem(item)}
-                                value={id}
-                              >
-                                <span className="truncate">{label}</span>
-                              </CommandItem>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  ) : (
-                    allItems.map((item, index) => {
-                      const id = itemToId(item) || "";
-                      const label = itemToName(item) || "";
-                      const isHighlighted = index === highlightedIndex;
+                  <div
+                    style={{
+                      height: `${virtualizer.getTotalSize()}px`,
+                      position: "relative",
+                      width: "100%",
+                    }}
+                  >
+                    {virtualizer.getVirtualItems().map(vi => {
+                      const item = allItems[vi.index];
+                      const id = String(item.key);
+                      const label = item.value;
+                      const isHighlighted = vi.index === highlightedIndex;
                       return (
-                        <CommandItem
-                          className={`
-                            cursor-pointer
-                            ${isHighlighted ? "bg-accent" : ""}
-                          `}
-                          data-item="true"
+                        <div
+                          data-index={vi.index}
                           key={id}
-                          onMouseEnter={() => setHighlightedIndex(index)}
-                          onSelect={() => handleSelectItem(item)}
-                          value={id}
+                          style={{
+                            left: 0,
+                            position: "absolute",
+                            top: 0,
+                            transform: `translateY(${vi.start}px)`,
+                            width: "100%",
+                          }}
                         >
-                          <span className="truncate">{label}</span>
-                        </CommandItem>
+                          <CommandItem
+                            className={`
+                              cursor-pointer
+                              ${isHighlighted ? "bg-accent" : ""}
+                            `}
+                            data-item="true"
+                            onMouseEnter={() => setHighlightedIndex(vi.index)}
+                            onSelect={() => handleSelectItem(item)}
+                            value={id}
+                          >
+                            <span className="truncate">{label}</span>
+                          </CommandItem>
+                        </div>
                       );
-                    })
-                  )}
+                    })}
+                  </div>
                 </CommandGroup>
               )}
 
@@ -522,7 +467,9 @@ export function InfiniteSearchableSelect<TData extends Entity>({
         </PopoverContent>
       </Popover>
 
-      {showError && error && <p className="text-sm text-red-500">{error}</p>}
+      {showError && error && (
+        <p className="text-sm text-red-500">{error.message}</p>
+      )}
     </div>
   );
 }

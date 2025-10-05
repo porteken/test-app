@@ -1,7 +1,7 @@
 "use client";
 
 import { Plus } from "lucide-react";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -25,18 +25,18 @@ import {
   TableLoadingState,
 } from "./table-common";
 
-// -------------------- Props --------------------
-// createNewRow prop has been removed to fix the error
+// -------------------- Types --------------------
 interface EditableTableProperties<T extends { id: number | string }> {
   apiBaseUrl: string;
   columns: ColumnConfig<T>[];
 }
-const current_date = new Date().toISOString().split("T")[0];
+
 // -------------------- Component --------------------
 export function EditableTable<T extends { id: number | string }>({
   apiBaseUrl,
   columns,
 }: Readonly<EditableTableProperties<T>>) {
+  // -------------------- State --------------------
   const [data, setData] = useState<T[]>([]);
   const [editingRowId, setEditingRowId] = useState<null | number | string>(
     null
@@ -51,7 +51,7 @@ export function EditableTable<T extends { id: number | string }>({
   const [error, setError] = useState<Error | null>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
-  // -------------------- Fetch --------------------
+  // -------------------- Data Fetching --------------------
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
@@ -63,10 +63,10 @@ export function EditableTable<T extends { id: number | string }>({
       const result: T[] = await response.json();
       setData(result);
     } catch (error_) {
-      const error__ =
+      const errorInstance =
         error_ instanceof Error ? error_ : new Error("Failed to fetch data");
-      setError(error__);
-      toast.error("Error loading data", { description: error__.message });
+      setError(errorInstance);
+      toast.error("Error loading data", { description: errorInstance.message });
     } finally {
       setLoading(false);
     }
@@ -76,7 +76,7 @@ export function EditableTable<T extends { id: number | string }>({
     fetchData();
   }, [fetchData]);
 
-  // -------------------- Editing --------------------
+  // -------------------- Row Editing --------------------
   const startEditing = useCallback((row: T) => {
     setEditingRowId(row.id);
     setEditedRow({ ...row });
@@ -146,7 +146,7 @@ export function EditableTable<T extends { id: number | string }>({
     }
   }, [editedRow, editingRowId, apiBaseUrl, columns]);
 
-  // -------------------- Delete --------------------
+  // -------------------- Row Deletion --------------------
   const openDeleteConfirmModal = useCallback((id: number | string) => {
     setRowToDelete(id);
     setDeleteModalOpen(true);
@@ -176,8 +176,7 @@ export function EditableTable<T extends { id: number | string }>({
     }
   }, [rowToDelete, apiBaseUrl]);
 
-  // -------------------- Add --------------------
-  // Restored original addRow logic
+  // -------------------- Row Addition --------------------
   const addRow = useCallback(() => {
     if (editingRowId !== null) {
       toast.warning("Please save or cancel your current changes first.");
@@ -186,15 +185,15 @@ export function EditableTable<T extends { id: number | string }>({
 
     const newRow = { id: `new-${Date.now()}` } as T;
 
-    // Type-safe initialization of columns
+    // Initialize columns with default values
     for (const col of columns) {
       const key = col.key;
       if (col.type === "checkbox") {
-        (newRow as Record<keyof T, unknown>)[key] = false as T[keyof T];
+        newRow[key] = false as T[typeof key];
       } else if (col.type === "date") {
-        (newRow as Record<keyof T, unknown>)[key] = current_date as T[keyof T];
+        newRow[key] = new Date().toISOString().split("T")[0] as T[typeof key];
       } else {
-        (newRow as Record<keyof T, unknown>)[key] = "" as T[keyof T];
+        newRow[key] = "" as T[typeof key];
       }
     }
 
@@ -202,7 +201,7 @@ export function EditableTable<T extends { id: number | string }>({
     startEditing(newRow);
   }, [columns, startEditing, editingRowId]);
 
-  // -------------------- Update Edited Row --------------------
+  // -------------------- Field Updates --------------------
   const updateEditedRow = useCallback(
     <K extends keyof T>(key: K, value: T[K]) => {
       setEditedRow(previous =>
@@ -218,6 +217,18 @@ export function EditableTable<T extends { id: number | string }>({
   );
 
   // -------------------- Render --------------------
+  const isEditing = editingRowId !== null;
+
+  const addRowButton = useMemo(
+    () => (
+      <Button className="gap-2" disabled={isEditing} onClick={addRow}>
+        <Plus className="h-4 w-4" />
+        Add Row
+      </Button>
+    ),
+    [isEditing, addRow]
+  );
+
   if (loading) {
     return <TableLoadingState />;
   }
@@ -226,19 +237,12 @@ export function EditableTable<T extends { id: number | string }>({
     return <TableErrorState error={error} retry={fetchData} />;
   }
 
-  const addRowButton = (
-    <Button className="gap-2" disabled={editingRowId !== null} onClick={addRow}>
-      <Plus className="h-4 w-4" />
-      Add Row
-    </Button>
-  );
-
   return (
     <div className="space-y-6">
       {/* Controls */}
       <div className="flex items-center justify-between">
         {addRowButton}
-        {editingRowId !== null && (
+        {isEditing && (
           <p className="text-sm text-destructive">
             Finish editing to add a new row
           </p>
@@ -246,7 +250,7 @@ export function EditableTable<T extends { id: number | string }>({
       </div>
 
       {/* Table */}
-      {data.length === 0 && !editingRowId ? (
+      {data.length === 0 && !isEditing ? (
         <TableEmptyState action={addRowButton} />
       ) : (
         <div className="rounded-md border">

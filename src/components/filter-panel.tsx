@@ -235,9 +235,8 @@ export function InfiniteSearchableSelect<TData extends Entity>({
             <button
               aria-label={`Clear filter for ${config.label}`}
               className={`
-                absolute right-6 top-1/2 -translate-y-1/2
-                flex h-5 w-5 cursor-pointer items-center justify-center
-                rounded p-0
+                absolute top-1/2 right-6 flex h-5 w-5 -translate-y-1/2
+                cursor-pointer items-center justify-center rounded p-0
                 hover:bg-gray-100
               `}
               onClick={handleClear}
@@ -502,7 +501,7 @@ interface FilterPanelProperties {
   onSelectChange: (_key: string, _value: Entity | null) => void;
 }
 
-interface FilterProps {
+interface FilterProperties {
   apiConfig: ApiConfig;
   config: FilterConfig;
   debouncedFilters: FiltersState;
@@ -524,7 +523,7 @@ const Filter = ({
   filters,
   onSearchChange,
   onSelectChange,
-}: FilterProps) => {
+}: FilterProperties) => {
   const filterQuery = useFilterOptions(
     config.key,
     debouncedFilters,
