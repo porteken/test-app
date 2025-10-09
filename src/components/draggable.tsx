@@ -15,6 +15,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { GripVertical, Plus } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -45,6 +46,9 @@ interface DraggableEditableTableProperties<T extends { id: number | string }> {
   apiBaseUrl: string;
   columns: ColumnConfig<T>[];
   createNewRow: (_position: number) => T;
+  gcTime?: number;
+  queryKey?: string[];
+  staleTime?: number;
 }
 type RowType = number | string | undefined
 // -------------------- Component --------------------
@@ -52,47 +56,154 @@ export function DraggableEditableTable<T extends { id: number | string }>({
   apiBaseUrl,
   columns,
   createNewRow,
+  gcTime = 5 * 60 * 1000,
+  queryKey,
+  staleTime = 30_000,
 }: Readonly<DraggableEditableTableProperties<T>>) {
-  const [data, setData] = useState<T[]>([]);
+  const queryClient = useQueryClient();
+  const [localData, setLocalData] = useState<T[]>([]);
   const [editingRowId, setEditingRowId] = useState<RowType>();
   const [editedRow, setEditedRow] = useState<T | undefined>();
   const [rowToDelete, setRowToDelete] = useState<RowType>();
   const [validationErrors, setValidationErrors] = useState<
     Record<string, string>
   >({});
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState<RowType>();
-  const [error, setError] = useState<Error | undefined>();
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
-  const sortableIds = useMemo(() => data.map(item => item.id), [data]);
-  const hasUnsavedChanges = editingRowId !== undefined;
+  // -------------------- Data Fetching --------------------
+  const defaultQueryKey = useMemo(
+    () => ["draggable-table", apiBaseUrl],
+    [apiBaseUrl]
+  );
 
-  // -------------------- Fetch --------------------
-  const fetchData = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(undefined);
+  const {
+    data: fetchedData,
+    error,
+    isError,
+    isLoading,
+    refetch,
+  } = useQuery<T[], Error>({
+    gcTime,
+    queryFn: async () => {
       const response = await fetch(apiBaseUrl);
       if (!response.ok) {
         throw new Error(`Failed to fetch: ${response.statusText}`);
       }
-      const result: T[] = await response.json();
-      setData(result);
-    } catch (error_) {
-      const error__ =
-        error_ instanceof Error ? error_ : new Error("Failed to fetch data");
-      setError(error__);
-      toast.error("Error fetching data", { description: error__.message });
-    } finally {
-      setLoading(false);
-    }
-  }, [apiBaseUrl]);
+      return response.json();
+    },
+    queryKey: queryKey ?? defaultQueryKey,
+    staleTime,
+  });
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  // Sync fetched data to local data for optimistic updates
+  const data = useMemo(() => {
+    if (fetchedData) {
+      // Preserve any new unsaved rows
+      const newRows = localData.filter(row => !isPersistentId(row.id));
+      return [...newRows, ...fetchedData];
+    }
+    return localData;
+  }, [fetchedData, localData]);
+
+  const sortableIds = useMemo(() => data.map(item => item.id), [data]);
+  const hasUnsavedChanges = editingRowId !== undefined;
+
+  // -------------------- Mutations --------------------
+  const reorderMutation = useMutation<T[], Error, T[]>({
+    mutationFn: async (reorderedData: T[]) => {
+      const updatePromises = reorderedData.map(async (row, index) => {
+        const response = await fetch(`${apiBaseUrl}/${row.id}`, {
+          body: JSON.stringify({ ...row, position: index }),
+          headers: { "Content-Type": "application/json" },
+          method: "PUT",
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to update position for row ${row.id}`);
+        }
+        return response.json();
+      });
+
+      return Promise.all(updatePromises);
+    },
+    onError: (error: Error) => {
+      toast.error("Error updating order", { description: error.message });
+    },
+    onSuccess: () => {
+      toast.success("Row order updated");
+      queryClient.invalidateQueries({ queryKey: queryKey ?? defaultQueryKey });
+    },
+  });
+
+  const saveMutation = useMutation<
+    T,
+    Error,
+    { data: T; isNew: boolean; tempId?: number | string }
+  >({
+    mutationFn: async ({ data: rowData, isNew }) => {
+      const url = isNew ? apiBaseUrl : `${apiBaseUrl}/${rowData.id}`;
+      const method = isNew ? "POST" : "PUT";
+      const payload = isNew ? { ...rowData } : rowData;
+
+      if (isNew) {
+        delete (payload as { id?: number | string }).id;
+      }
+
+      const response = await fetch(url, {
+        body: JSON.stringify(payload),
+        headers: { "Content-Type": "application/json" },
+        method,
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        throw new Error(
+          errorBody.message || `Failed to save: ${response.statusText}`
+        );
+      }
+
+      return response.json();
+    },
+    onError: (error: Error) => {
+      toast.error("Error saving record", { description: error.message });
+    },
+    onSuccess: (savedRecord, variables) => {
+      toast.success(`Record ${variables.isNew ? "created" : "updated"}`);
+
+      // Remove temp row if it was a new record
+      if (variables.isNew && variables.tempId) {
+        setLocalData(current =>
+          current.filter(row => row.id !== variables.tempId)
+        );
+      }
+
+      queryClient.invalidateQueries({ queryKey: queryKey ?? defaultQueryKey });
+
+      setEditingRowId(undefined);
+      setEditedRow(undefined);
+      setValidationErrors({});
+    },
+  });
+
+  const deleteMutation = useMutation<void, Error, number | string>({
+    mutationFn: async (id: number | string) => {
+      const response = await fetch(`${apiBaseUrl}/${id}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to delete: ${response.statusText}`);
+      }
+    },
+    onError: (error: Error) => {
+      toast.error("Error deleting record", { description: error.message });
+    },
+    onSuccess: () => {
+      toast.success("Record deleted");
+      queryClient.invalidateQueries({ queryKey: queryKey ?? defaultQueryKey });
+      setDeleteModalOpen(false);
+      setRowToDelete(undefined);
+    },
+  });
 
   // -------------------- Drag sensors --------------------
   const sensors = useSensors(
@@ -101,7 +212,7 @@ export function DraggableEditableTable<T extends { id: number | string }>({
 
   // -------------------- Handle drag end --------------------
   const handleDragEnd = useCallback(
-    async (event: DragEndEvent) => {
+    (event: DragEndEvent) => {
       const { active, over } = event;
       if (!over || active.id === over.id) {
         return;
@@ -113,35 +224,10 @@ export function DraggableEditableTable<T extends { id: number | string }>({
         return;
       }
 
-      const originalData = [...data];
       const reordered = arrayMove(data, oldIndex, newIndex);
-      setData(reordered);
-
-      try {
-        const updatePromises = reordered.map(async (row, index) => {
-          const response = await fetch(`${apiBaseUrl}/${row.id}`, {
-            body: JSON.stringify({ ...row, position: index }),
-            headers: { "Content-Type": "application/json" },
-            method: "PUT",
-          });
-          if (!response.ok) {
-            throw new Error(`Failed to update position for row ${row.id}`);
-          }
-          const result: T = await response.json();
-          return result;
-        });
-
-        await Promise.all(updatePromises);
-        toast.success("Row order updated");
-      } catch (error_) {
-        const errorMessage =
-          error_ instanceof Error ? error_.message : "Failed to update order";
-        toast.error("Error updating order", { description: errorMessage });
-        // Revert to original order on failure
-        setData(originalData);
-      }
+      reorderMutation.mutate(reordered);
     },
-    [data, apiBaseUrl]
+    [data, reorderMutation]
   );
 
   // -------------------- Editing --------------------
@@ -153,89 +239,40 @@ export function DraggableEditableTable<T extends { id: number | string }>({
 
   const cancelEditing = useCallback(() => {
     if (editedRow && !isPersistentId(editedRow.id)) {
-      setData(current => current.filter(r => r.id !== editedRow.id));
+      setLocalData(current => current.filter(r => r.id !== editedRow.id));
     }
     setEditingRowId(undefined);
     setEditedRow(undefined);
     setValidationErrors({});
   }, [editedRow]);
 
-  // -------------------- API Service --------------------
-  const apiService = useMemo(
-    () => ({
-      performSave: async (url: string, method: string, payload: Partial<T>): Promise<T> => {
-        const response = await fetch(url, {
-          body: JSON.stringify(payload),
-          headers: { "Content-Type": "application/json" },
-          method,
-        });
-        if (!response.ok) {
-          const errorBody = await response.json().catch(() => ({}));
-          throw new Error(
-            errorBody.message || `Failed to save: ${response.statusText}`
-          );
-        }
-        const result: T = await response.json();
-        return result;
-      },
-      prepareRequest: (row: T, baseUrl: string) => {
-        const isNew = !isPersistentId(row.id);
-        const url = isNew ? baseUrl : `${baseUrl}/${row.id}`;
-        const method = isNew ? "POST" : "PUT";
-        const payload = { ...row };
-        if (isNew) {
-          delete (payload as { id?: number | string }).id;
-        }
-        return { isNew, method, payload, url };
-      },
-      validateRow: (row: T, cols: ColumnConfig<T>[]) => {
-        const errors: Record<string, string> = {};
-        for (const col of cols) {
-          if (col.validate) {
-            const error = col.validate(row[col.key], row);
-            if (error) {
-              errors[col.key as string] = error;
-            }
-          }
-        }
-        return errors;
-      },
-    }),
-    []
-  );
-
-  const saveRow = useCallback(async () => {
+  const saveRow = useCallback(() => {
     if (!editedRow) {
       return;
     }
 
-    const errors = apiService.validateRow(editedRow, columns);
+    // Validate
+    const errors: Record<string, string> = {};
+    for (const col of columns) {
+      if (col.validate) {
+        const error = col.validate(editedRow[col.key], editedRow);
+        if (error) {
+          errors[col.key as string] = error;
+        }
+      }
+    }
     if (Object.keys(errors).length > 0) {
       setValidationErrors(errors);
       return;
     }
 
-    const { isNew, method, payload, url } = apiService.prepareRequest(
-      editedRow,
-      apiBaseUrl
-    );
-
-    try {
-      setSaving(true);
-      const saved = await apiService.performSave(url, method, payload);
-      setData(current => current.map(r => (r.id === editedRow.id ? saved : r)));
-      toast.success(`Record ${isNew ? "created" : "updated"}`);
-      setEditingRowId(undefined);
-      setEditedRow(undefined);
-      setValidationErrors({});
-    } catch (error_) {
-      const errorMessage =
-        error_ instanceof Error ? error_.message : "Failed to save record";
-      toast.error("Error saving record", { description: errorMessage });
-    } finally {
-      setSaving(false);
-    }
-  }, [editedRow, apiBaseUrl, columns, apiService]);
+    const isNew = !isPersistentId(editedRow.id);
+    saveMutation.mutate({
+      data: editedRow,
+      isNew,
+      tempId: isNew ? editedRow.id : undefined,
+    });
+  }, [editedRow, columns, saveMutation]);
 
   // -------------------- Keyboard handlers --------------------
   useEffect(() => {
@@ -263,46 +300,11 @@ export function DraggableEditableTable<T extends { id: number | string }>({
     setDeleteModalOpen(true);
   }, []);
 
-  const confirmDelete = useCallback(async () => {
-    if (rowToDelete === undefined) {
-      return;
+  const confirmDelete = useCallback(() => {
+    if (rowToDelete !== undefined) {
+      deleteMutation.mutate(rowToDelete);
     }
-
-    const deletedRow = data.find(r => r.id === rowToDelete);
-    if (!deletedRow) {
-      return;
-    }
-
-    // Optimistic update
-    setData(current => current.filter(r => r.id !== rowToDelete));
-    setDeleteModalOpen(false);
-    setDeleting(rowToDelete);
-    setRowToDelete(undefined);
-
-    try {
-      const response = await fetch(`${apiBaseUrl}/${rowToDelete}`, {
-        method: "DELETE",
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to delete: ${response.statusText}`);
-      }
-      toast.success("Record deleted");
-    } catch (error_) {
-      const errorMessage =
-        error_ instanceof Error ? error_.message : "Failed to delete record";
-      toast.error("Error deleting record", { description: errorMessage });
-      // Rollback on failure
-      setData(current => {
-        const index = current.findIndex(r => r.id > deletedRow.id);
-        if (index === -1) {
-          return [...current, deletedRow];
-        }
-        return [...current.slice(0, index), deletedRow, ...current.slice(index)];
-      });
-    } finally {
-      setDeleting(undefined);
-    }
-  }, [rowToDelete, apiBaseUrl, data]);
+  }, [rowToDelete, deleteMutation]);
 
   // -------------------- Add --------------------
   const addRow = useCallback(() => {
@@ -311,7 +313,7 @@ export function DraggableEditableTable<T extends { id: number | string }>({
       return;
     }
     const newRow = createNewRow(data.length);
-    setData(previous => [newRow, ...previous]);
+    setLocalData(previous => [newRow, ...previous]);
     startEditing(newRow);
   }, [createNewRow, data.length, startEditing, hasUnsavedChanges]);
 
@@ -331,6 +333,8 @@ export function DraggableEditableTable<T extends { id: number | string }>({
   );
 
   // -------------------- Render Logic --------------------
+  const isSaving = saveMutation.isPending;
+
   const addRowButton = (
     <Button disabled={hasUnsavedChanges} onClick={addRow}>
       <Plus className="mr-2 h-4 w-4" />
@@ -338,12 +342,12 @@ export function DraggableEditableTable<T extends { id: number | string }>({
     </Button>
   );
 
-  if (loading) {
+  if (isLoading) {
     return <TableLoadingState />;
   }
 
-  if (error && data.length === 0) {
-    return <TableErrorState error={error} retry={fetchData} />;
+  if (isError && data.length === 0) {
+    return <TableErrorState error={error} retry={refetch} />;
   }
 
   if (data.length === 0) {
@@ -393,14 +397,13 @@ export function DraggableEditableTable<T extends { id: number | string }>({
                   <SortableRow
                     cancelEditing={cancelEditing}
                     columns={columns}
-                    deleting={deleting === row.id}
                     editedRow={editedRow}
                     isEditing={editingRowId === row.id}
                     key={row.id}
                     openDeleteConfirmModal={openDeleteConfirmModal}
                     row={row}
                     saveRow={saveRow}
-                    saving={saving}
+                    saving={isSaving}
                     startEditing={startEditing}
                     updateEditedRow={updateEditedRow}
                     validationErrors={validationErrors}
@@ -427,12 +430,11 @@ function SortableRow<T extends { id: number | string }>(
   properties: Readonly<{
     cancelEditing: () => void;
     columns: ColumnConfig<T>[];
-    deleting: boolean;
     editedRow: T | undefined;
     isEditing: boolean;
     openDeleteConfirmModal: (_id: number | string) => void;
     row: T;
-    saveRow: () => Promise<void>;
+    saveRow: () => void;
     saving: boolean;
     startEditing: (_row: T) => void;
     updateEditedRow: <K extends keyof T>(_key: K, _value: T[K]) => void;
@@ -442,7 +444,6 @@ function SortableRow<T extends { id: number | string }>(
   const {
     cancelEditing,
     columns,
-    deleting,
     editedRow,
     isEditing,
     openDeleteConfirmModal,
@@ -478,10 +479,7 @@ function SortableRow<T extends { id: number | string }>(
       ref={setNodeRef}
       style={style}
       {...attributes}
-      className={`
-        ${isEditing ? "bg-yellow-50" : ""}
-        ${deleting ? "opacity-50" : ""}
-      `}
+      className={isEditing ? "bg-yellow-50" : ""}
     >
       {/* Drag Handle */}
       <TableCell className="w-10">

@@ -1,7 +1,7 @@
 "use client";
 
 import { Plus } from "lucide-react";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -27,17 +27,36 @@ import {
 
 // -------------------- Types --------------------
 interface EditableTableProperties<T extends { id: number | string }> {
-  apiBaseUrl: string;
   columns: ColumnConfig<T>[];
+  data: T[];
+  error: Error | null;
+  isError: boolean;
+  isLoading: boolean;
+  isSaving: boolean;
+  onDelete: (_id: number | string) => void;
+  onSave: (
+    _editedRow: T,
+    _isNew: boolean,
+    _temporaryId?: number | string
+  ) => void;
+  refetch: () => void;
+  setLocalData: React.Dispatch<React.SetStateAction<T[]>>;
 }
 
 // -------------------- Component --------------------
 export function EditableTable<T extends { id: number | string }>({
-  apiBaseUrl,
   columns,
+  data,
+  error,
+  isError,
+  isLoading,
+  isSaving,
+  onDelete,
+  onSave,
+  refetch,
+  setLocalData,
 }: Readonly<EditableTableProperties<T>>) {
   // -------------------- State --------------------
-  const [data, setData] = useState<T[]>([]);
   const [editingRowId, setEditingRowId] = useState<null | number | string>(
     null
   );
@@ -46,35 +65,7 @@ export function EditableTable<T extends { id: number | string }>({
   const [validationErrors, setValidationErrors] = useState<
     Record<string, string>
   >({});
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-
-  // -------------------- Data Fetching --------------------
-  const fetchData = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const response = await fetch(apiBaseUrl);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch: ${response.statusText}`);
-      }
-      const result: T[] = await response.json();
-      setData(result);
-    } catch (error_) {
-      const errorInstance =
-        error_ instanceof Error ? error_ : new Error("Failed to fetch data");
-      setError(errorInstance);
-      toast.error("Error loading data", { description: errorInstance.message });
-    } finally {
-      setLoading(false);
-    }
-  }, [apiBaseUrl]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
 
   // -------------------- Row Editing --------------------
   const startEditing = useCallback((row: T) => {
@@ -85,14 +76,14 @@ export function EditableTable<T extends { id: number | string }>({
 
   const cancelEditing = useCallback(() => {
     if (editedRow && !isPersistentId(editedRow.id)) {
-      setData(current => current.filter(row => row.id !== editedRow.id));
+      setLocalData(current => current.filter(row => row.id !== editedRow.id));
     }
     setEditingRowId(null);
     setEditedRow(null);
     setValidationErrors({});
-  }, [editedRow]);
+  }, [editedRow, setLocalData]);
 
-  const saveRow = useCallback(async () => {
+  const saveRow = useCallback(() => {
     if (!editedRow) {
       return;
     }
@@ -112,39 +103,13 @@ export function EditableTable<T extends { id: number | string }>({
     }
 
     const isNew = !isPersistentId(editedRow.id);
-    const url = isNew ? apiBaseUrl : `${apiBaseUrl}/${editedRow.id}`;
-    const method = isNew ? "POST" : "PUT";
+    onSave(editedRow, isNew, isNew ? editedRow.id : undefined);
 
-    try {
-      setSaving(true);
-      const response = await fetch(url, {
-        body: JSON.stringify(editedRow),
-        headers: { "Content-Type": "application/json" },
-        method,
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to save: ${response.statusText}`);
-      }
-      const savedRecord: T = await response.json();
-
-      setData(current =>
-        isNew
-          ? [savedRecord, ...current.filter(r => r.id !== editedRow.id)]
-          : current.map(r => (r.id === editingRowId ? savedRecord : r))
-      );
-
-      toast.success(`Record ${isNew ? "created" : "updated"} successfully`);
-      setEditingRowId(null);
-      setEditedRow(null);
-      setValidationErrors({});
-    } catch (error_) {
-      const errorMessage =
-        error_ instanceof Error ? error_.message : "Failed to save record";
-      toast.error("Error saving record", { description: errorMessage });
-    } finally {
-      setSaving(false);
-    }
-  }, [editedRow, editingRowId, apiBaseUrl, columns]);
+    // Reset editing state after save
+    setEditingRowId(null);
+    setEditedRow(null);
+    setValidationErrors({});
+  }, [editedRow, columns, onSave]);
 
   // -------------------- Row Deletion --------------------
   const openDeleteConfirmModal = useCallback((id: number | string) => {
@@ -152,29 +117,13 @@ export function EditableTable<T extends { id: number | string }>({
     setDeleteModalOpen(true);
   }, []);
 
-  const confirmDelete = useCallback(async () => {
-    if (rowToDelete === null) {
-      return;
-    }
-
-    try {
-      const response = await fetch(`${apiBaseUrl}/${rowToDelete}`, {
-        method: "DELETE",
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to delete: ${response.statusText}`);
-      }
-      setData(current => current.filter(row => row.id !== rowToDelete));
-      toast.success("Record deleted successfully");
-    } catch (error_) {
-      const errorMessage =
-        error_ instanceof Error ? error_.message : "Failed to delete record";
-      toast.error("Error deleting record", { description: errorMessage });
-    } finally {
+  const confirmDelete = useCallback(() => {
+    if (rowToDelete !== null) {
+      onDelete(rowToDelete);
       setDeleteModalOpen(false);
       setRowToDelete(null);
     }
-  }, [rowToDelete, apiBaseUrl]);
+  }, [rowToDelete, onDelete]);
 
   // -------------------- Row Addition --------------------
   const addRow = useCallback(() => {
@@ -197,9 +146,9 @@ export function EditableTable<T extends { id: number | string }>({
       }
     }
 
-    setData(previous => [newRow, ...previous]);
+    setLocalData(previous => [newRow, ...previous]);
     startEditing(newRow);
-  }, [columns, startEditing, editingRowId]);
+  }, [columns, startEditing, editingRowId, setLocalData]);
 
   // -------------------- Field Updates --------------------
   const updateEditedRow = useCallback(
@@ -229,12 +178,12 @@ export function EditableTable<T extends { id: number | string }>({
     [isEditing, addRow]
   );
 
-  if (loading) {
+  if (isLoading) {
     return <TableLoadingState />;
   }
 
-  if (error && data.length === 0) {
-    return <TableErrorState error={error} retry={fetchData} />;
+  if (isError && data.length === 0) {
+    return <TableErrorState error={error} retry={refetch} />;
   }
 
   return (
@@ -283,7 +232,7 @@ export function EditableTable<T extends { id: number | string }>({
                         onDelete={() => openDeleteConfirmModal(row.id)}
                         onEdit={() => startEditing(row)}
                         onSave={saveRow}
-                        saving={saving}
+                        saving={isSaving}
                         validationErrors={validationErrors}
                       />
                     </TableCell>
@@ -298,7 +247,7 @@ export function EditableTable<T extends { id: number | string }>({
                             col={col}
                             errorMessage={errorMessage}
                             isEditing={isEditing}
-                            saving={saving}
+                            saving={isSaving}
                             updateEditedRow={updateEditedRow}
                             value={value}
                           />
