@@ -22,7 +22,7 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { GripVertical, Plus } from "lucide-react";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -44,9 +44,36 @@ import {
   TableEmptyState,
   TableErrorState,
   TableLoadingState,
+  useEditableTable,
 } from "./table-common";
 
-// -------------------- Props --------------------
+// -------------------- Types --------------------
+interface ActionCellProperties<T> {
+  cancelEditing: () => void;
+  isEditing: boolean;
+  isExistingRecord: boolean;
+  isSaving: boolean;
+  openDeleteConfirmModal: (_id: number | string) => void;
+  row: T;
+  rowId: number | string;
+  saveRow: () => void;
+  startEditing: (_row: T) => void;
+  validationErrors: Record<string, string>;
+}
+
+interface DataCellProperties<T> {
+  col: ColumnConfig<T>;
+  errorMessage: string | undefined;
+  isEditing: boolean;
+  isSaving: boolean;
+  updateEditedRow: <K extends keyof T>(_key: K, _value: T[K]) => void;
+  value: T[keyof T];
+}
+
+interface DragCellProperties {
+  disabled: boolean;
+}
+
 interface DraggableEditableTableProperties<T extends { id: number | string }> {
   columns: ColumnConfig<T>[];
   createNewRow: (_position: number) => T;
@@ -64,11 +91,73 @@ interface DraggableEditableTableProperties<T extends { id: number | string }> {
   ) => void;
   refetch: () => void;
 }
-type RowType = number | string | undefined;
+
+// -------------------- Cell Renderer Components --------------------
+function ActionCell<T extends { id: number | string }>({
+  cancelEditing,
+  isEditing,
+  isExistingRecord,
+  isSaving,
+  openDeleteConfirmModal,
+  row,
+  rowId,
+  saveRow,
+  startEditing,
+  validationErrors,
+}: Readonly<ActionCellProperties<T>>) {
+  return (
+    <ActionButtons
+      isEditing={isEditing}
+      isExistingRecord={isExistingRecord}
+      onCancel={cancelEditing}
+      onDelete={() => openDeleteConfirmModal(rowId)}
+      onEdit={() => startEditing(row)}
+      onSave={saveRow}
+      saving={isSaving}
+      validationErrors={validationErrors}
+    />
+  );
+}
+
+function DataCell<T extends { id: number | string }>({
+  col,
+  errorMessage,
+  isEditing,
+  isSaving,
+  updateEditedRow,
+  value,
+}: Readonly<DataCellProperties<T>>) {
+  return (
+    <CellRenderer
+      col={col}
+      errorMessage={errorMessage}
+      isEditing={isEditing}
+      saving={isSaving}
+      updateEditedRow={updateEditedRow}
+      value={value}
+    />
+  );
+}
+
+const DragCell = React.memo<DragCellProperties>(({ disabled }) => (
+  <button
+    aria-label="Drag to reorder"
+    className={`
+      flex h-full w-full items-center justify-center
+      ${disabled ? "cursor-not-allowed opacity-50" : "cursor-grab"}
+    `}
+    disabled={disabled}
+    type="button"
+  >
+    <GripVertical className="h-4 w-4" />
+  </button>
+));
+DragCell.displayName = "DragCell";
+
 // -------------------- Component --------------------
 export function DraggableEditableTable<T extends { id: number | string }>({
   columns,
-  createNewRow,
+  createNewRow: createNewRowWithPosition,
   data: externalData,
   error,
   isError,
@@ -79,28 +168,37 @@ export function DraggableEditableTable<T extends { id: number | string }>({
   onSave,
   refetch,
 }: Readonly<DraggableEditableTableProperties<T>>) {
-  const [localData, setLocalData] = useState<T[]>([]);
-  const [editingRowId, setEditingRowId] = useState<RowType>();
-  const [editedRow, setEditedRow] = useState<T | undefined>();
-  const [rowToDelete, setRowToDelete] = useState<RowType>();
-  const [validationErrors, setValidationErrors] = useState<
-    Record<string, string>
-  >({});
-  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  // Wrap createNewRow to match hook signature
+  const createNewRowWrapper = useCallback(
+    () => createNewRowWithPosition(0),
+    [createNewRowWithPosition]
+  );
 
-  // -------------------- Merged Data --------------------
-  // Combine external data with local temporary rows
-  const data = useMemo(() => {
-    if (externalData) {
-      // Preserve any new unsaved rows
-      const newRows = localData.filter(row => !isPersistentId(row.id));
-      return [...newRows, ...externalData];
-    }
-    return localData;
-  }, [externalData, localData]);
+  // -------------------- Use Shared Hook --------------------
+  const {
+    cancelEditing,
+    confirmDelete,
+    data,
+    deleteModalOpen,
+    editedRow,
+    editingRowId,
+    openDeleteConfirmModal,
+    saveRow,
+    setDeleteModalOpen,
+    startEditing,
+    updateEditedRow,
+    validationErrors,
+  } = useEditableTable({
+    columns,
+    createNewRow: createNewRowWrapper,
+    externalData,
+    isSaving,
+    onDelete,
+    onSave,
+  });
 
   const sortableIds = useMemo(() => data.map(item => item.id), [data]);
-  const hasUnsavedChanges = editingRowId !== undefined;
+  const hasUnsavedChanges = editingRowId !== null;
 
   // -------------------- Drag sensors --------------------
   const sensors = useSensors(
@@ -127,62 +225,10 @@ export function DraggableEditableTable<T extends { id: number | string }>({
     [data, onReorder]
   );
 
-  // -------------------- Editing --------------------
-  const startEditing = useCallback((row: T) => {
-    setEditingRowId(row.id);
-    setEditedRow({ ...row });
-    setValidationErrors({});
-  }, []);
-
-  const cancelEditing = useCallback(() => {
-    if (editedRow && !isPersistentId(editedRow.id)) {
-      setLocalData(current => current.filter(r => r.id !== editedRow.id));
-    }
-    setEditingRowId(undefined);
-    setEditedRow(undefined);
-    setValidationErrors({});
-  }, [editedRow]);
-
-  const saveRow = useCallback(() => {
-    if (!editedRow) {
-      return;
-    }
-
-    // Validate
-    const errors: Record<string, string> = {};
-    for (const col of columns) {
-      if (col.validate) {
-        const error = col.validate(editedRow[col.key], editedRow);
-        if (error) {
-          errors[col.key as string] = error;
-        }
-      }
-    }
-    if (Object.keys(errors).length > 0) {
-      setValidationErrors(errors);
-      return;
-    }
-
-    const isNew = !isPersistentId(editedRow.id);
-    const temporaryId = isNew ? editedRow.id : undefined;
-
-    onSave(editedRow, isNew, temporaryId);
-
-    // Remove temporary row from local data after save
-    if (isNew && temporaryId) {
-      setLocalData(current => current.filter(row => row.id !== temporaryId));
-    }
-
-    // Reset editing state after save
-    setEditingRowId(undefined);
-    setEditedRow(undefined);
-    setValidationErrors({});
-  }, [editedRow, columns, onSave]);
-
   // -------------------- Keyboard handlers --------------------
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (editingRowId === undefined) {
+      if (editingRowId === null) {
         return;
       }
 
@@ -199,66 +245,22 @@ export function DraggableEditableTable<T extends { id: number | string }>({
     return () => globalThis.removeEventListener("keydown", handleKeyDown);
   }, [editingRowId, saveRow, cancelEditing]);
 
-  // -------------------- Delete --------------------
-  const openDeleteConfirmModal = useCallback((id: number | string) => {
-    setRowToDelete(id);
-    setDeleteModalOpen(true);
-  }, []);
-
-  const confirmDelete = useCallback(() => {
-    if (rowToDelete !== undefined) {
-      onDelete(rowToDelete);
-      setDeleteModalOpen(false);
-      setRowToDelete(undefined);
-    }
-  }, [rowToDelete, onDelete]);
-
-  // -------------------- Add --------------------
+  // -------------------- Custom Add Row (with position) --------------------
   const addRow = useCallback(() => {
-    if (hasUnsavedChanges) {
+    if (editingRowId !== null) {
       toast.warning("Please save or cancel your current changes first.");
       return;
     }
-    const newRow = createNewRow(data.length);
-    setLocalData(previous => [newRow, ...previous]);
+    const newRow = createNewRowWithPosition(data.length);
     startEditing(newRow);
-  }, [createNewRow, data.length, startEditing, hasUnsavedChanges]);
-
-  // -------------------- Update Edited Row --------------------
-  const updateEditedRow = useCallback(
-    <K extends keyof T>(key: K, value: T[K]) => {
-      setEditedRow(previous =>
-        previous ? { ...previous, [key]: value } : undefined
-      );
-      setValidationErrors(previous => {
-        const newErrors = { ...previous };
-        delete newErrors[key as string];
-        return newErrors;
-      });
-    },
-    []
-  );
+  }, [createNewRowWithPosition, data.length, startEditing, editingRowId]);
 
   // -------------------- Table Columns --------------------
   const tableColumns = useMemo<ColumnDef<T>[]>(() => {
     const dragColumn: ColumnDef<T> = {
       cell: ({ row }) => {
-        const rowData = row.original;
-        const isEditingRow = editingRowId === rowData.id;
-
-        return (
-          <button
-            aria-label="Drag to reorder"
-            className={`
-              flex h-full w-full items-center justify-center
-              ${isEditingRow ? "cursor-not-allowed opacity-50" : "cursor-grab"}
-            `}
-            disabled={isEditingRow}
-            type="button"
-          >
-            <GripVertical className="h-4 w-4" />
-          </button>
-        );
+        const isEditingRow = editingRowId === row.original.id;
+        return <DragCell disabled={isEditingRow} />;
       },
       header: "",
       id: "drag",
@@ -272,14 +274,16 @@ export function DraggableEditableTable<T extends { id: number | string }>({
         const isExistingRecord = isPersistentId(rowData.id);
 
         return (
-          <ActionButtons
+          <ActionCell
+            cancelEditing={cancelEditing}
             isEditing={isEditingRow}
             isExistingRecord={isExistingRecord}
-            onCancel={cancelEditing}
-            onDelete={() => openDeleteConfirmModal(rowData.id)}
-            onEdit={() => startEditing(rowData)}
-            onSave={saveRow}
-            saving={isSaving}
+            isSaving={isSaving}
+            openDeleteConfirmModal={openDeleteConfirmModal}
+            row={rowData}
+            rowId={rowData.id}
+            saveRow={saveRow}
+            startEditing={startEditing}
             validationErrors={validationErrors}
           />
         );
@@ -299,11 +303,11 @@ export function DraggableEditableTable<T extends { id: number | string }>({
         const errorMessage = validationErrors[col.key as string];
 
         return (
-          <CellRenderer
+          <DataCell
             col={col}
             errorMessage={errorMessage}
             isEditing={isEditingRow}
-            saving={isSaving}
+            isSaving={isSaving}
             updateEditedRow={updateEditedRow}
             value={value}
           />
@@ -315,16 +319,16 @@ export function DraggableEditableTable<T extends { id: number | string }>({
 
     return [dragColumn, actionColumn, ...dataColumns];
   }, [
-    columns,
-    editingRowId,
-    editedRow,
-    validationErrors,
-    isSaving,
     cancelEditing,
+    columns,
+    editedRow,
+    editingRowId,
+    isSaving,
     openDeleteConfirmModal,
-    startEditing,
     saveRow,
+    startEditing,
     updateEditedRow,
+    validationErrors,
   ]);
 
   // -------------------- React Table --------------------
@@ -428,7 +432,7 @@ function SortableTableRow<T extends { id: number | string }>({
   editingRowId,
   row,
 }: Readonly<{
-  editingRowId: number | string | undefined;
+  editingRowId: null | number | string;
   row: import("@tanstack/react-table").Row<T>;
 }>) {
   const rowData = row.original;

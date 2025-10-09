@@ -1,7 +1,8 @@
 "use client";
 
 import { AlertCircle, Edit, Loader2, Save, Trash2, X } from "lucide-react";
-import React, { useCallback, useMemo } from "react";
+import React, { useCallback, useMemo, useState } from "react";
+import { toast } from "sonner";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -526,3 +527,242 @@ export const TableLoadingState = React.memo(() => {
 });
 
 TableLoadingState.displayName = "TableLoadingState";
+
+// -------------------- Custom Hook: useEditableTable --------------------
+export interface UseEditableTableOptions<T extends { id: number | string }> {
+  columns: ColumnConfig<T>[];
+  createNewRow: () => T;
+  externalData: T[];
+  isSaving: boolean;
+  onDelete: (_id: number | string) => void;
+  onSave: (
+    _editedRow: T,
+    _isNew: boolean,
+    _temporaryId?: number | string
+  ) => void;
+}
+
+export function useEditableTable<T extends { id: number | string }>({
+  columns,
+  createNewRow,
+  externalData,
+  isSaving,
+  onDelete,
+  onSave,
+}: UseEditableTableOptions<T>) {
+  // -------------------- State --------------------
+  const [localData, setLocalData] = useState<T[]>([]);
+  const [editingRowId, setEditingRowId] = useState<number | string | null>(
+    null
+  );
+  const [editedRow, setEditedRow] = useState<T | null>(null);
+  const [rowToDelete, setRowToDelete] = useState<number | string | null>(null);
+  const [validationErrors, setValidationErrors] = useState<
+    Record<string, string>
+  >({});
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+
+  // -------------------- Merged Data --------------------
+  const data = useMemo(() => {
+    if (externalData) {
+      const newRows = localData.filter(row => !isPersistentId(row.id));
+      return [...newRows, ...externalData];
+    }
+    return localData;
+  }, [externalData, localData]);
+
+  // -------------------- Editing Handlers --------------------
+  const startEditing = useCallback((row: T) => {
+    setEditingRowId(row.id);
+    setEditedRow({ ...row });
+    setValidationErrors({});
+  }, []);
+
+  const cancelEditing = useCallback(() => {
+    if (editedRow && !isPersistentId(editedRow.id)) {
+      setLocalData(current => current.filter(row => row.id !== editedRow.id));
+    }
+    setEditingRowId(null);
+    setEditedRow(null);
+    setValidationErrors({});
+  }, [editedRow]);
+
+  const saveRow = useCallback(() => {
+    if (!editedRow) {
+      return;
+    }
+
+    // Validate
+    const errors: Record<string, string> = {};
+    for (const col of columns) {
+      if (col.validate) {
+        const error = col.validate(editedRow[col.key], editedRow);
+        if (error) {
+          errors[col.key as string] = error;
+        }
+      }
+    }
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors);
+      return;
+    }
+
+    const isNew = !isPersistentId(editedRow.id);
+    const temporaryId = isNew ? editedRow.id : undefined;
+
+    onSave(editedRow, isNew, temporaryId);
+
+    // Remove temporary row from local data after save
+    if (isNew && temporaryId) {
+      setLocalData(current => current.filter(row => row.id !== temporaryId));
+    }
+
+    // Reset editing state after save
+    setEditingRowId(null);
+    setEditedRow(null);
+    setValidationErrors({});
+  }, [editedRow, columns, onSave]);
+
+  const updateEditedRow = useCallback(
+    <K extends keyof T>(key: K, value: T[K]) => {
+      setEditedRow(previous =>
+        previous ? { ...previous, [key]: value } : null
+      );
+      setValidationErrors(previous => {
+        const newErrors = { ...previous };
+        delete newErrors[key as string];
+        return newErrors;
+      });
+    },
+    []
+  );
+
+  // -------------------- Delete Handlers --------------------
+  const openDeleteConfirmModal = useCallback((id: number | string) => {
+    setRowToDelete(id);
+    setDeleteModalOpen(true);
+  }, []);
+
+  const confirmDelete = useCallback(() => {
+    if (rowToDelete !== null) {
+      onDelete(rowToDelete);
+      setDeleteModalOpen(false);
+      setRowToDelete(null);
+    }
+  }, [rowToDelete, onDelete]);
+
+  // -------------------- Add Row Handler --------------------
+  const addRow = useCallback(() => {
+    if (editingRowId !== null) {
+      toast.warning("Please save or cancel your current changes first.");
+      return;
+    }
+
+    const newRow = createNewRow();
+    setLocalData(previous => [newRow, ...previous]);
+    startEditing(newRow);
+  }, [createNewRow, startEditing, editingRowId]);
+
+  return {
+    // State
+    data,
+    deleteModalOpen,
+    editedRow,
+    editingRowId,
+    isSaving,
+    localData,
+    rowToDelete,
+    setDeleteModalOpen,
+    validationErrors,
+
+    // Handlers
+    addRow,
+    cancelEditing,
+    confirmDelete,
+    openDeleteConfirmModal,
+    saveRow,
+    startEditing,
+    updateEditedRow,
+  };
+}
+
+// -------------------- Helper: Create Table Column Definitions --------------------
+export interface CreateTableColumnsOptions<T extends { id: number | string }> {
+  cancelEditing: () => void;
+  columns: ColumnConfig<T>[];
+  editedRow: T | null | undefined;
+  editingRowId: number | string | null | undefined;
+  isSaving: boolean;
+  openDeleteConfirmModal: (_id: number | string) => void;
+  saveRow: () => void;
+  startEditing: (_row: T) => void;
+  updateEditedRow: <K extends keyof T>(_key: K, _value: T[K]) => void;
+  validationErrors: Record<string, string>;
+}
+
+export function createTableColumns<T extends { id: number | string }>(
+  options: CreateTableColumnsOptions<T>
+) {
+  const {
+    cancelEditing,
+    columns,
+    editedRow,
+    editingRowId,
+    isSaving,
+    openDeleteConfirmModal,
+    saveRow,
+    startEditing,
+    updateEditedRow,
+    validationErrors,
+  } = options;
+
+  const actionColumn = {
+    cell: ({ row }: { row: { original: T } }) => {
+      const rowData = row.original;
+      const isEditingRow = editingRowId === rowData.id;
+      const isExistingRecord = isPersistentId(rowData.id);
+
+      return (
+        <ActionButtons
+          isEditing={isEditingRow}
+          isExistingRecord={isExistingRecord}
+          onCancel={cancelEditing}
+          onDelete={() => openDeleteConfirmModal(rowData.id)}
+          onEdit={() => startEditing(rowData)}
+          onSave={saveRow}
+          saving={isSaving}
+          validationErrors={validationErrors}
+        />
+      );
+    },
+    header: "Actions",
+    id: "actions",
+    size: 130,
+  };
+
+  const dataColumns = columns.map(col => ({
+    accessorKey: col.key as string,
+    cell: ({ row }: { row: { original: T } }) => {
+      const rowData = row.original;
+      const isEditingRow = editingRowId === rowData.id;
+      const safeRow = (isEditingRow ? editedRow : rowData) as T;
+      const value = safeRow[col.key];
+      const errorMessage = validationErrors[col.key as string];
+
+      return (
+        <CellRenderer
+          col={col}
+          errorMessage={errorMessage}
+          isEditing={isEditingRow}
+          saving={isSaving}
+          updateEditedRow={updateEditedRow}
+          value={value}
+        />
+      );
+    },
+    header: col.label,
+    id: String(col.key),
+  }));
+
+  return [actionColumn, ...dataColumns];
+}
