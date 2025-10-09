@@ -15,7 +15,12 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  type ColumnDef,
+  flexRender,
+  getCoreRowModel,
+  useReactTable,
+} from "@tanstack/react-table";
 import { GripVertical, Plus } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -43,24 +48,37 @@ import {
 
 // -------------------- Props --------------------
 interface DraggableEditableTableProperties<T extends { id: number | string }> {
-  apiBaseUrl: string;
   columns: ColumnConfig<T>[];
   createNewRow: (_position: number) => T;
-  gcTime?: number;
-  queryKey?: string[];
-  staleTime?: number;
+  data: T[];
+  error: Error | null;
+  isError: boolean;
+  isLoading: boolean;
+  isSaving: boolean;
+  onDelete: (_id: number | string) => void;
+  onReorder: (_reorderedData: T[]) => void;
+  onSave: (
+    _editedRow: T,
+    _isNew: boolean,
+    _temporaryId?: number | string
+  ) => void;
+  refetch: () => void;
 }
-type RowType = number | string | undefined
+type RowType = number | string | undefined;
 // -------------------- Component --------------------
 export function DraggableEditableTable<T extends { id: number | string }>({
-  apiBaseUrl,
   columns,
   createNewRow,
-  gcTime = 5 * 60 * 1000,
-  queryKey,
-  staleTime = 30_000,
+  data: externalData,
+  error,
+  isError,
+  isLoading,
+  isSaving,
+  onDelete,
+  onReorder,
+  onSave,
+  refetch,
 }: Readonly<DraggableEditableTableProperties<T>>) {
-  const queryClient = useQueryClient();
   const [localData, setLocalData] = useState<T[]>([]);
   const [editingRowId, setEditingRowId] = useState<RowType>();
   const [editedRow, setEditedRow] = useState<T | undefined>();
@@ -70,140 +88,19 @@ export function DraggableEditableTable<T extends { id: number | string }>({
   >({});
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
-  // -------------------- Data Fetching --------------------
-  const defaultQueryKey = useMemo(
-    () => ["draggable-table", apiBaseUrl],
-    [apiBaseUrl]
-  );
-
-  const {
-    data: fetchedData,
-    error,
-    isError,
-    isLoading,
-    refetch,
-  } = useQuery<T[], Error>({
-    gcTime,
-    queryFn: async () => {
-      const response = await fetch(apiBaseUrl);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch: ${response.statusText}`);
-      }
-      return response.json();
-    },
-    queryKey: queryKey ?? defaultQueryKey,
-    staleTime,
-  });
-
-  // Sync fetched data to local data for optimistic updates
+  // -------------------- Merged Data --------------------
+  // Combine external data with local temporary rows
   const data = useMemo(() => {
-    if (fetchedData) {
+    if (externalData) {
       // Preserve any new unsaved rows
       const newRows = localData.filter(row => !isPersistentId(row.id));
-      return [...newRows, ...fetchedData];
+      return [...newRows, ...externalData];
     }
     return localData;
-  }, [fetchedData, localData]);
+  }, [externalData, localData]);
 
   const sortableIds = useMemo(() => data.map(item => item.id), [data]);
   const hasUnsavedChanges = editingRowId !== undefined;
-
-  // -------------------- Mutations --------------------
-  const reorderMutation = useMutation<T[], Error, T[]>({
-    mutationFn: async (reorderedData: T[]) => {
-      const updatePromises = reorderedData.map(async (row, index) => {
-        const response = await fetch(`${apiBaseUrl}/${row.id}`, {
-          body: JSON.stringify({ ...row, position: index }),
-          headers: { "Content-Type": "application/json" },
-          method: "PUT",
-        });
-        if (!response.ok) {
-          throw new Error(`Failed to update position for row ${row.id}`);
-        }
-        return response.json();
-      });
-
-      return Promise.all(updatePromises);
-    },
-    onError: (error: Error) => {
-      toast.error("Error updating order", { description: error.message });
-    },
-    onSuccess: () => {
-      toast.success("Row order updated");
-      queryClient.invalidateQueries({ queryKey: queryKey ?? defaultQueryKey });
-    },
-  });
-
-  const saveMutation = useMutation<
-    T,
-    Error,
-    { data: T; isNew: boolean; tempId?: number | string }
-  >({
-    mutationFn: async ({ data: rowData, isNew }) => {
-      const url = isNew ? apiBaseUrl : `${apiBaseUrl}/${rowData.id}`;
-      const method = isNew ? "POST" : "PUT";
-      const payload = isNew ? { ...rowData } : rowData;
-
-      if (isNew) {
-        delete (payload as { id?: number | string }).id;
-      }
-
-      const response = await fetch(url, {
-        body: JSON.stringify(payload),
-        headers: { "Content-Type": "application/json" },
-        method,
-      });
-
-      if (!response.ok) {
-        const errorBody = await response.json().catch(() => ({}));
-        throw new Error(
-          errorBody.message || `Failed to save: ${response.statusText}`
-        );
-      }
-
-      return response.json();
-    },
-    onError: (error: Error) => {
-      toast.error("Error saving record", { description: error.message });
-    },
-    onSuccess: (savedRecord, variables) => {
-      toast.success(`Record ${variables.isNew ? "created" : "updated"}`);
-
-      // Remove temp row if it was a new record
-      if (variables.isNew && variables.tempId) {
-        setLocalData(current =>
-          current.filter(row => row.id !== variables.tempId)
-        );
-      }
-
-      queryClient.invalidateQueries({ queryKey: queryKey ?? defaultQueryKey });
-
-      setEditingRowId(undefined);
-      setEditedRow(undefined);
-      setValidationErrors({});
-    },
-  });
-
-  const deleteMutation = useMutation<void, Error, number | string>({
-    mutationFn: async (id: number | string) => {
-      const response = await fetch(`${apiBaseUrl}/${id}`, {
-        method: "DELETE",
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to delete: ${response.statusText}`);
-      }
-    },
-    onError: (error: Error) => {
-      toast.error("Error deleting record", { description: error.message });
-    },
-    onSuccess: () => {
-      toast.success("Record deleted");
-      queryClient.invalidateQueries({ queryKey: queryKey ?? defaultQueryKey });
-      setDeleteModalOpen(false);
-      setRowToDelete(undefined);
-    },
-  });
 
   // -------------------- Drag sensors --------------------
   const sensors = useSensors(
@@ -225,9 +122,9 @@ export function DraggableEditableTable<T extends { id: number | string }>({
       }
 
       const reordered = arrayMove(data, oldIndex, newIndex);
-      reorderMutation.mutate(reordered);
+      onReorder(reordered);
     },
-    [data, reorderMutation]
+    [data, onReorder]
   );
 
   // -------------------- Editing --------------------
@@ -267,12 +164,20 @@ export function DraggableEditableTable<T extends { id: number | string }>({
     }
 
     const isNew = !isPersistentId(editedRow.id);
-    saveMutation.mutate({
-      data: editedRow,
-      isNew,
-      tempId: isNew ? editedRow.id : undefined,
-    });
-  }, [editedRow, columns, saveMutation]);
+    const temporaryId = isNew ? editedRow.id : undefined;
+
+    onSave(editedRow, isNew, temporaryId);
+
+    // Remove temporary row from local data after save
+    if (isNew && temporaryId) {
+      setLocalData(current => current.filter(row => row.id !== temporaryId));
+    }
+
+    // Reset editing state after save
+    setEditingRowId(undefined);
+    setEditedRow(undefined);
+    setValidationErrors({});
+  }, [editedRow, columns, onSave]);
 
   // -------------------- Keyboard handlers --------------------
   useEffect(() => {
@@ -302,9 +207,11 @@ export function DraggableEditableTable<T extends { id: number | string }>({
 
   const confirmDelete = useCallback(() => {
     if (rowToDelete !== undefined) {
-      deleteMutation.mutate(rowToDelete);
+      onDelete(rowToDelete);
+      setDeleteModalOpen(false);
+      setRowToDelete(undefined);
     }
-  }, [rowToDelete, deleteMutation]);
+  }, [rowToDelete, onDelete]);
 
   // -------------------- Add --------------------
   const addRow = useCallback(() => {
@@ -332,8 +239,100 @@ export function DraggableEditableTable<T extends { id: number | string }>({
     []
   );
 
-  // -------------------- Render Logic --------------------
-  const isSaving = saveMutation.isPending;
+  // -------------------- Table Columns --------------------
+  const tableColumns = useMemo<ColumnDef<T>[]>(() => {
+    const dragColumn: ColumnDef<T> = {
+      cell: ({ row }) => {
+        const rowData = row.original;
+        const isEditingRow = editingRowId === rowData.id;
+
+        return (
+          <button
+            aria-label="Drag to reorder"
+            className={`
+              flex h-full w-full items-center justify-center
+              ${isEditingRow ? "cursor-not-allowed opacity-50" : "cursor-grab"}
+            `}
+            disabled={isEditingRow}
+            type="button"
+          >
+            <GripVertical className="h-4 w-4" />
+          </button>
+        );
+      },
+      header: "",
+      id: "drag",
+      size: 40,
+    };
+
+    const actionColumn: ColumnDef<T> = {
+      cell: ({ row }) => {
+        const rowData = row.original;
+        const isEditingRow = editingRowId === rowData.id;
+        const isExistingRecord = isPersistentId(rowData.id);
+
+        return (
+          <ActionButtons
+            isEditing={isEditingRow}
+            isExistingRecord={isExistingRecord}
+            onCancel={cancelEditing}
+            onDelete={() => openDeleteConfirmModal(rowData.id)}
+            onEdit={() => startEditing(rowData)}
+            onSave={saveRow}
+            saving={isSaving}
+            validationErrors={validationErrors}
+          />
+        );
+      },
+      header: "Actions",
+      id: "actions",
+      size: 130,
+    };
+
+    const dataColumns: ColumnDef<T>[] = columns.map(col => ({
+      accessorKey: col.key as string,
+      cell: ({ row }) => {
+        const rowData = row.original;
+        const isEditingRow = editingRowId === rowData.id;
+        const safeRow = (isEditingRow ? editedRow : rowData) as T;
+        const value = safeRow[col.key];
+        const errorMessage = validationErrors[col.key as string];
+
+        return (
+          <CellRenderer
+            col={col}
+            errorMessage={errorMessage}
+            isEditing={isEditingRow}
+            saving={isSaving}
+            updateEditedRow={updateEditedRow}
+            value={value}
+          />
+        );
+      },
+      header: col.label,
+      id: String(col.key),
+    }));
+
+    return [dragColumn, actionColumn, ...dataColumns];
+  }, [
+    columns,
+    editingRowId,
+    editedRow,
+    validationErrors,
+    isSaving,
+    cancelEditing,
+    openDeleteConfirmModal,
+    startEditing,
+    saveRow,
+    updateEditedRow,
+  ]);
+
+  // -------------------- React Table --------------------
+  const table = useReactTable({
+    columns: tableColumns,
+    data,
+    getCoreRowModel: getCoreRowModel(),
+  });
 
   const addRowButton = (
     <Button disabled={hasUnsavedChanges} onClick={addRow}>
@@ -380,33 +379,32 @@ export function DraggableEditableTable<T extends { id: number | string }>({
         >
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead className="w-10" />
-                <TableHead className="w-32">Actions</TableHead>
-                {columns.map(col => (
-                  <TableHead key={String(col.key)}>{col.label}</TableHead>
-                ))}
-              </TableRow>
+              {table.getHeaderGroups().map(headerGroup => (
+                <TableRow key={headerGroup.id}>
+                  {headerGroup.headers.map(header => (
+                    <TableHead
+                      key={header.id}
+                      style={{ width: header.getSize() }}
+                    >
+                      {flexRender(
+                        header.column.columnDef.header,
+                        header.getContext()
+                      )}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              ))}
             </TableHeader>
             <TableBody>
               <SortableContext
                 items={sortableIds}
                 strategy={verticalListSortingStrategy}
               >
-                {data.map(row => (
-                  <SortableRow
-                    cancelEditing={cancelEditing}
-                    columns={columns}
-                    editedRow={editedRow}
-                    isEditing={editingRowId === row.id}
+                {table.getRowModel().rows.map(row => (
+                  <SortableTableRow
+                    editingRowId={editingRowId}
                     key={row.id}
-                    openDeleteConfirmModal={openDeleteConfirmModal}
                     row={row}
-                    saveRow={saveRow}
-                    saving={isSaving}
-                    startEditing={startEditing}
-                    updateEditedRow={updateEditedRow}
-                    validationErrors={validationErrors}
                   />
                 ))}
               </SortableContext>
@@ -425,35 +423,16 @@ export function DraggableEditableTable<T extends { id: number | string }>({
   );
 }
 
-// -------------------- Sortable Row --------------------
-function SortableRow<T extends { id: number | string }>(
-  properties: Readonly<{
-    cancelEditing: () => void;
-    columns: ColumnConfig<T>[];
-    editedRow: T | undefined;
-    isEditing: boolean;
-    openDeleteConfirmModal: (_id: number | string) => void;
-    row: T;
-    saveRow: () => void;
-    saving: boolean;
-    startEditing: (_row: T) => void;
-    updateEditedRow: <K extends keyof T>(_key: K, _value: T[K]) => void;
-    validationErrors: Record<string, string>;
-  }>
-) {
-  const {
-    cancelEditing,
-    columns,
-    editedRow,
-    isEditing,
-    openDeleteConfirmModal,
-    row,
-    saveRow,
-    saving,
-    startEditing,
-    updateEditedRow,
-    validationErrors,
-  } = properties;
+// -------------------- Sortable Table Row --------------------
+function SortableTableRow<T extends { id: number | string }>({
+  editingRowId,
+  row,
+}: Readonly<{
+  editingRowId: number | string | undefined;
+  row: import("@tanstack/react-table").Row<T>;
+}>) {
+  const rowData = row.original;
+  const isEditing = editingRowId === rowData.id;
 
   const {
     attributes,
@@ -462,7 +441,7 @@ function SortableRow<T extends { id: number | string }>(
     setNodeRef,
     transform,
     transition,
-  } = useSortable({ disabled: isEditing, id: row.id });
+  } = useSortable({ disabled: isEditing, id: rowData.id });
 
   const style = {
     opacity: isDragging ? 0.8 : 1,
@@ -471,60 +450,24 @@ function SortableRow<T extends { id: number | string }>(
     zIndex: isDragging ? 1 : 0,
   };
 
-  const isExistingRecord = isPersistentId(row.id);
-  const safeRow = (isEditing ? editedRow : row) as T;
-
   return (
     <TableRow
+      className={isEditing ? "bg-yellow-50" : ""}
       ref={setNodeRef}
       style={style}
-      {...attributes}
-      className={isEditing ? "bg-yellow-50" : ""}
     >
-      {/* Drag Handle */}
-      <TableCell className="w-10">
-        <button
-          {...listeners}
-          aria-label="Drag to reorder"
-          className={`
-            flex h-full w-full items-center justify-center
-            ${isEditing ? "cursor-not-allowed opacity-50" : "cursor-grab"}
-          `}
-          disabled={isEditing}
-          type="button"
-        >
-          <GripVertical className="h-4 w-4" />
-        </button>
-      </TableCell>
-
-      {/* Actions */}
-      <TableCell className="w-32">
-        <ActionButtons
-          isEditing={isEditing}
-          isExistingRecord={isExistingRecord}
-          onCancel={cancelEditing}
-          onDelete={() => openDeleteConfirmModal(row.id)}
-          onEdit={() => startEditing(row)}
-          onSave={saveRow}
-          saving={saving}
-          validationErrors={validationErrors}
-        />
-      </TableCell>
-
-      {/* Dynamic Columns */}
-      {columns.map(col => {
-        const value = safeRow[col.key];
-        const errorMessage = validationErrors[col.key as string];
+      {row.getVisibleCells().map(cell => {
+        // Apply drag listeners to the drag handle cell
+        const isDragCell = cell.column.id === "drag";
         return (
-          <TableCell key={String(col.key)}>
-            <CellRenderer
-              col={col}
-              errorMessage={errorMessage}
-              isEditing={isEditing}
-              saving={saving}
-              updateEditedRow={updateEditedRow}
-              value={value}
-            />
+          <TableCell key={cell.id}>
+            {isDragCell ? (
+              <div {...listeners} {...attributes}>
+                {flexRender(cell.column.columnDef.cell, cell.getContext())}
+              </div>
+            ) : (
+              flexRender(cell.column.columnDef.cell, cell.getContext())
+            )}
           </TableCell>
         );
       })}

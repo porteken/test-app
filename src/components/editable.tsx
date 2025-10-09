@@ -1,5 +1,11 @@
 "use client";
 
+import {
+  type ColumnDef,
+  flexRender,
+  getCoreRowModel,
+  useReactTable,
+} from "@tanstack/react-table";
 import { Plus } from "lucide-react";
 import React, { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -28,6 +34,7 @@ import {
 // -------------------- Types --------------------
 interface EditableTableProperties<T extends { id: number | string }> {
   columns: ColumnConfig<T>[];
+  createNewRow: () => T;
   data: T[];
   error: Error | null;
   isError: boolean;
@@ -40,13 +47,13 @@ interface EditableTableProperties<T extends { id: number | string }> {
     _temporaryId?: number | string
   ) => void;
   refetch: () => void;
-  setLocalData: React.Dispatch<React.SetStateAction<T[]>>;
 }
 
 // -------------------- Component --------------------
 export function EditableTable<T extends { id: number | string }>({
   columns,
-  data,
+  createNewRow,
+  data: externalData,
   error,
   isError,
   isLoading,
@@ -54,9 +61,9 @@ export function EditableTable<T extends { id: number | string }>({
   onDelete,
   onSave,
   refetch,
-  setLocalData,
 }: Readonly<EditableTableProperties<T>>) {
   // -------------------- State --------------------
+  const [localData, setLocalData] = useState<T[]>([]);
   const [editingRowId, setEditingRowId] = useState<null | number | string>(
     null
   );
@@ -66,6 +73,17 @@ export function EditableTable<T extends { id: number | string }>({
     Record<string, string>
   >({});
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+
+  // -------------------- Merged Data --------------------
+  // Combine external data with local temporary rows
+  const data = useMemo(() => {
+    if (externalData) {
+      // Preserve any new unsaved rows
+      const newRows = localData.filter(row => !isPersistentId(row.id));
+      return [...newRows, ...externalData];
+    }
+    return localData;
+  }, [externalData, localData]);
 
   // -------------------- Row Editing --------------------
   const startEditing = useCallback((row: T) => {
@@ -103,7 +121,14 @@ export function EditableTable<T extends { id: number | string }>({
     }
 
     const isNew = !isPersistentId(editedRow.id);
-    onSave(editedRow, isNew, isNew ? editedRow.id : undefined);
+    const temporaryId = isNew ? editedRow.id : undefined;
+
+    onSave(editedRow, isNew, temporaryId);
+
+    // Remove temporary row from local data after save
+    if (isNew && temporaryId) {
+      setLocalData(current => current.filter(row => row.id !== temporaryId));
+    }
 
     // Reset editing state after save
     setEditingRowId(null);
@@ -132,23 +157,10 @@ export function EditableTable<T extends { id: number | string }>({
       return;
     }
 
-    const newRow = { id: `new-${Date.now()}` } as T;
-
-    // Initialize columns with default values
-    for (const col of columns) {
-      const key = col.key;
-      if (col.type === "checkbox") {
-        newRow[key] = false as T[typeof key];
-      } else if (col.type === "date") {
-        newRow[key] = new Date().toISOString().split("T")[0] as T[typeof key];
-      } else {
-        newRow[key] = "" as T[typeof key];
-      }
-    }
-
+    const newRow = createNewRow();
     setLocalData(previous => [newRow, ...previous]);
     startEditing(newRow);
-  }, [columns, startEditing, editingRowId, setLocalData]);
+  }, [createNewRow, startEditing, editingRowId]);
 
   // -------------------- Field Updates --------------------
   const updateEditedRow = useCallback(
@@ -164,6 +176,77 @@ export function EditableTable<T extends { id: number | string }>({
     },
     []
   );
+
+  // -------------------- Table Columns --------------------
+  const tableColumns = useMemo<ColumnDef<T>[]>(() => {
+    const actionColumn: ColumnDef<T> = {
+      cell: ({ row }) => {
+        const rowData = row.original;
+        const isEditingRow = editingRowId === rowData.id;
+        const isExistingRecord = isPersistentId(rowData.id);
+
+        return (
+          <ActionButtons
+            isEditing={isEditingRow}
+            isExistingRecord={isExistingRecord}
+            onCancel={cancelEditing}
+            onDelete={() => openDeleteConfirmModal(rowData.id)}
+            onEdit={() => startEditing(rowData)}
+            onSave={saveRow}
+            saving={isSaving}
+            validationErrors={validationErrors}
+          />
+        );
+      },
+      header: "Actions",
+      id: "actions",
+      size: 130,
+    };
+
+    const dataColumns: ColumnDef<T>[] = columns.map(col => ({
+      accessorKey: col.key as string,
+      cell: ({ row }) => {
+        const rowData = row.original;
+        const isEditingRow = editingRowId === rowData.id;
+        const safeRow = (isEditingRow ? editedRow : rowData) as T;
+        const value = safeRow[col.key];
+        const errorMessage = validationErrors[col.key as string];
+
+        return (
+          <CellRenderer
+            col={col}
+            errorMessage={errorMessage}
+            isEditing={isEditingRow}
+            saving={isSaving}
+            updateEditedRow={updateEditedRow}
+            value={value}
+          />
+        );
+      },
+      header: col.label,
+      id: String(col.key),
+    }));
+
+    return [actionColumn, ...dataColumns];
+  }, [
+    columns,
+    editingRowId,
+    editedRow,
+    validationErrors,
+    isSaving,
+    cancelEditing,
+    openDeleteConfirmModal,
+    startEditing,
+    saveRow,
+    updateEditedRow,
+  ]);
+
+  // -------------------- React Table --------------------
+  const table = useReactTable({
+    columns: tableColumns,
+    data,
+    getCoreRowModel: getCoreRowModel(),
+  });
 
   // -------------------- Render --------------------
   const isEditing = editingRowId !== null;
@@ -205,55 +288,39 @@ export function EditableTable<T extends { id: number | string }>({
         <div className="rounded-md border">
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead className="w-32">Actions</TableHead>
-                {columns.map(col => (
-                  <TableHead key={String(col.key)}>{col.label}</TableHead>
-                ))}
-              </TableRow>
+              {table.getHeaderGroups().map(headerGroup => (
+                <TableRow key={headerGroup.id}>
+                  {headerGroup.headers.map(header => (
+                    <TableHead
+                      key={header.id}
+                      style={{ width: header.getSize() }}
+                    >
+                      {flexRender(
+                        header.column.columnDef.header,
+                        header.getContext()
+                      )}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              ))}
             </TableHeader>
             <TableBody>
-              {data.map(row => {
-                const isEditing = editingRowId === row.id;
-                const isExistingRecord = isPersistentId(row.id);
-                const safeRow = (isEditing ? editedRow : row) as T;
+              {table.getRowModel().rows.map(row => {
+                const isEditingRow = editingRowId === row.original.id;
 
                 return (
                   <TableRow
-                    className={isEditing ? "bg-yellow-50" : ""}
+                    className={isEditingRow ? "bg-yellow-50" : ""}
                     key={row.id}
                   >
-                    {/* Actions */}
-                    <TableCell>
-                      <ActionButtons
-                        isEditing={isEditing}
-                        isExistingRecord={isExistingRecord}
-                        onCancel={cancelEditing}
-                        onDelete={() => openDeleteConfirmModal(row.id)}
-                        onEdit={() => startEditing(row)}
-                        onSave={saveRow}
-                        saving={isSaving}
-                        validationErrors={validationErrors}
-                      />
-                    </TableCell>
-
-                    {/* Dynamic Columns */}
-                    {columns.map(col => {
-                      const value = safeRow[col.key];
-                      const errorMessage = validationErrors[col.key as string];
-                      return (
-                        <TableCell key={String(col.key)}>
-                          <CellRenderer
-                            col={col}
-                            errorMessage={errorMessage}
-                            isEditing={isEditing}
-                            saving={isSaving}
-                            updateEditedRow={updateEditedRow}
-                            value={value}
-                          />
-                        </TableCell>
-                      );
-                    })}
+                    {row.getVisibleCells().map(cell => (
+                      <TableCell key={cell.id}>
+                        {flexRender(
+                          cell.column.columnDef.cell,
+                          cell.getContext()
+                        )}
+                      </TableCell>
+                    ))}
                   </TableRow>
                 );
               })}

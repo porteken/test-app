@@ -7,11 +7,11 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { toast } from "sonner";
 
 import { EditableTable } from "./editable";
-import { ColumnConfig, isPersistentId } from "./table-common";
+import { ColumnConfig } from "./table-common";
 
 // Generic type that works with any record shape (requires id field)
 type TableRecord = Record<string, unknown> & { id: number | string };
@@ -54,7 +54,6 @@ export default function Page() {
 function PageContent() {
   const apiBaseUrl = "http://localhost:8000/api/editable";
   const queryClient = useQueryClient();
-  const [localData, setLocalData] = useState<TableRecord[]>([]);
 
   // -------------------- Data Fetching --------------------
   const defaultQueryKey = useMemo(
@@ -66,13 +65,10 @@ function PageContent() {
   const gcTime = 5 * 60 * 1000;
   const staleTime = 30_000;
 
-  const {
-    data: fetchedData,
-    error,
-    isError,
-    isLoading,
-    refetch,
-  } = useQuery<TableRecord[], Error>({
+  const { data, error, isError, isLoading, refetch } = useQuery<
+    TableRecord[],
+    Error
+  >({
     gcTime,
     queryFn: async () => {
       const response = await fetch(apiBaseUrl);
@@ -84,16 +80,6 @@ function PageContent() {
     queryKey,
     staleTime,
   });
-
-  // Sync fetched data to local data for optimistic updates
-  const data = useMemo(() => {
-    if (fetchedData) {
-      // Preserve any new unsaved rows
-      const newRows = localData.filter(row => !isPersistentId(row.id));
-      return [...newRows, ...fetchedData];
-    }
-    return localData;
-  }, [fetchedData, localData]);
 
   // -------------------- Mutations --------------------
   const saveMutation = useMutation<
@@ -120,17 +106,10 @@ function PageContent() {
     onError: (error: Error) => {
       toast.error("Error saving record", { description: error.message });
     },
-    onSuccess: (savedRecord, variables) => {
+    onSuccess: (_savedRecord, variables) => {
       toast.success(
         `Record ${variables.isNew ? "created" : "updated"} successfully`
       );
-
-      // Remove temp row if it was a new record
-      if (variables.isNew && variables.tempId) {
-        setLocalData(current =>
-          current.filter(row => row.id !== variables.tempId)
-        );
-      }
 
       // Invalidate and refetch
       queryClient.invalidateQueries({ queryKey });
@@ -175,10 +154,29 @@ function PageContent() {
     [deleteMutation]
   );
 
+  const createNewRow = useCallback((): TableRecord => {
+    const newRow: TableRecord = { id: `new-${Date.now()}` };
+
+    // Initialize columns with default values
+    for (const col of columns) {
+      const key = col.key;
+      if (col.type === "checkbox") {
+        newRow[String(key)] = false;
+      } else if (col.type === "date") {
+        newRow[String(key)] = new Date().toISOString().split("T")[0];
+      } else {
+        newRow[String(key)] = "";
+      }
+    }
+
+    return newRow;
+  }, []);
+
   return (
     <EditableTable<TableRecord>
       columns={columns}
-      data={data}
+      createNewRow={createNewRow}
+      data={data ?? []}
       error={error}
       isError={isError}
       isLoading={isLoading}
@@ -186,7 +184,6 @@ function PageContent() {
       onDelete={onDelete}
       onSave={onSave}
       refetch={refetch}
-      setLocalData={setLocalData}
     />
   );
 }
